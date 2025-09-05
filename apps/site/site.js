@@ -12,7 +12,7 @@
       compareRows:[ ['多文件一次提交','✅','❌'], ['移动端编辑体验','✅','一般'], ['无需后端','✅','✅'] ],
       changes:[
         {ver:'v0.1.0',date:'2025-09-06',desc:'初始化目录、官网与 Web App 起步版本。'},
-        {ver:'v0.1.0',date:'2025-09-06',desc:'统一 logo 路径 /apps/assets/logo.svg。'},
+        {ver:'v0.1.0',date:'2025-09-06',desc:'统一 logo 路径 ./assets/logo.svg。'},
         {ver:'v0.1.0',date:'2025-09-06',desc:'站点与 App 的多语言各自独立。'}
       ]
     },
@@ -26,7 +26,7 @@
       compareRows:[ ['Multi-file commit','✅','❌'], ['Mobile editing UX','✅','Fair'], ['No backend','✅','✅'] ],
       changes:[
         {ver:'v0.1.0',date:'2025-09-06',desc:'Initialize structure, site and web starters.'},
-        {ver:'v0.1.0',date:'2025-09-06',desc:'Unify logo path /apps/assets/logo.svg.'},
+        {ver:'v0.1.0',date:'2025-09-06',desc:'Unify logo path ./assets/logo.svg.'},
         {ver:'v0.1.0',date:'2025-09-06',desc:'Separate i18n for site and app.'}
       ]
     }

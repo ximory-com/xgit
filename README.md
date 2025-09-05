@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./apps/assets/logo.svg" alt="XGit Logo" width="120" height="120" />
+  <img src="./assets/logo.svg" alt="XGit Logo" width="120" height="120" />
 </p>
 
 # XGit
@@ -37,7 +37,7 @@ It enables you to browse repositories, edit files, and commit changes directly f
 
 ## 📌 版本 Version
 当前版本：v0.1.0  
-查看 [更新日志](./apps/docs/changelog.md)
+查看 [更新日志](./docs/changelog.md)
 
 ---
 
