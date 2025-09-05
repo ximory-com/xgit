@@ -1,0 +1,25 @@
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial;background:#fff;color:#111}
+.top{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-bottom:1px solid #eee}
+.brand{display:flex;gap:8px;align-items:center;text-decoration:none;color:#111;font-weight:700}
+.logo{width:24px;height:24px}
+.nav{display:flex;gap:8px;align-items:center}
+.main{display:grid;grid-template-columns:260px 1fr 300px;gap:10px;height:calc(100vh - 50px);padding:10px}
+.left,.center,.right{border:1px solid #eee;border-radius:10px;overflow:auto}
+.sec-title{padding:8px 10px;border-bottom:1px solid #f3f3f3;font-size:13px;color:#666}
+.list{list-style:none;margin:0;padding:6px}
+.list li{padding:6px 8px;border-radius:8px;cursor:pointer}
+.list li:hover{background:#f6f6f6}
+#editor{width:100%;height:calc(100% - 36px);border:none;outline:none;padding:12px;font-family:ui-monospace,Menlo,Consolas,monospace}
+.changes{padding:8px;display:flex;flex-direction:column;gap:8px}
+.change-row{display:flex;justify-content:space-between;align-items:center;border:1px solid #eee;border-radius:8px;padding:6px 8px;font-size:13px}
+.commit{display:flex;gap:8px;padding:8px}
+.commit input{flex:1;padding:8px;border:1px solid #ddd;border-radius:8px}
+.commit button{padding:8px 10px;border:1px solid #111;background:#111;color:#fff;border-radius:8px}
+@media (max-width: 960px){
+  .main{grid-template-columns:1fr;grid-auto-rows:minmax(220px,auto)}
+  .right{order:3}
+  .left{order:1}
+  .center{order:2}
+  #editor{height:320px}
+}

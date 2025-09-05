@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>XGit • Web App</title>
+  <link rel="stylesheet" href="./web.css">
+  <link rel="icon" href="/apps/assets/logo.png">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/apps/site/">
+      <img src="/apps/assets/logo.svg" class="logo" alt="XGit">
+      <span>XGit</span>
+    </a>
+    <nav class="nav">
+      <a href="/apps/site/" data-i18n="back">回到官网</a>
+      <button id="langZh">中文</button>
+      <button id="langEn">EN</button>
+    </nav>
+  </header>
+
+  <main class="main">
+    <aside class="left">
+      <div class="sec-title" data-i18n="repos">仓库</div>
+      <ul id="repos" class="list"></ul>
+      <div class="sec-title" data-i18n="tree">文件</div>
+      <ul id="tree" class="list"></ul>
+    </aside>
+
+    <section class="center">
+      <div class="sec-title" data-i18n="editor">编辑器</div>
+      <textarea id="editor"></textarea>
+    </section>
+
+    <aside class="right">
+      <div class="sec-title" data-i18n="changes">更改</div>
+      <div id="changes" class="changes"></div>
+      <div class="commit">
+        <input id="msg" placeholder="Commit message">
+        <button id="commitBtn" data-i18n="commit">提交</button>
+      </div>
+    </aside>
+  </main>
+
+  <script src="./web.js"></script>
+</body>
+</html>

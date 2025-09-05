@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>XGit • 官网</title>
+  <link rel="stylesheet" href="./site.css">
+  <link rel="icon" href="/apps/assets/logo.png">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/apps/site/">
+      <img src="/apps/assets/logo.svg" class="logo" alt="XGit">
+      <span>XGit</span>
+    </a>
+    <nav class="nav">
+      <a href="/apps/web/" data-i18n="openApp">打开 Web App</a>
+      <a href="https://github.com/ximory-com/xgit" target="_blank">GitHub</a>
+      <div class="lang">
+        <button id="btnZh">中文</button>
+        <button id="btnEn">EN</button>
+      </div>
+    </nav>
+  </header>
+
+  <main class="hero">
+    <div class="badge" id="ver">v0.1.0</div>
+    <h1 data-i18n="headline">更顺手的 Git 编辑器（移动端 & 网页端）</h1>
+    <p class="sub" data-i18n="subhead">聚焦仓库浏览、编辑、Diff、多文件一次提交。无需服务端，直接使用 GitHub API。</p>
+    <div class="cta">
+      <a class="btn primary" href="/apps/web/" data-i18n="openApp">打开 Web App</a>
+      <a class="btn" href="https://github.com/ximory-com/xgit" target="_blank" data-i18n="viewRepo">查看仓库</a>
+    </div>
+
+    <section class="panel">
+      <h2 data-i18n="features">特性</h2>
+      <ul id="feat" class="bullets"></ul>
+    </section>
+
+    <section class="panel">
+      <h2 data-i18n="compare">对比</h2>
+      <table class="cmp">
+        <thead><tr id="cmpHead"></tr></thead>
+        <tbody id="cmpBody"></tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <h2 data-i18n="changelog">更新</h2>
+      <div id="changes" class="changes"></div>
+    </section>
+  </main>
+
+  <footer class="foot">© XGit</footer>
+
+  <script src="./site.js"></script>
+</body>
+</html>
