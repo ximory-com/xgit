@@ -1,91 +1,64 @@
 <!doctype html>
 <html lang="zh">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>XGit • Web App</title>
-  <link rel="stylesheet" href="./web.css">
-  <link rel="icon" href="./assets/logo.png">
+  <link rel="icon" href="../assets/logo.png" />
+  <link rel="stylesheet" href="./web.css" />
 </head>
 <body>
-<header class="top">
-  <a class="brand" href="javascript:void(0);" id="toSite">
-    <img src="./assets/logo.svg" alt="XGit" class="logo">
-    <span>XGit Web</span>
-  </a>
-
-  <nav class="nav">
-    <span class="user">
-      <img id="userAvatar" alt="" style="display:none">
-      <b id="userName" class="ellipsis"></b>
-    </span>
-    <button id="btnLogin"  class="btn primary" data-i18n="loginByToken">用 Token 登录</button>
-    <button id="btnLogout" class="btn"        style="display:none" data-i18n="logout">退出登录</button>
-    <div class="lang">
-      <button id="langZh" class="chip">中文</button>
-      <button id="langEn" class="chip">EN</button>
-    </div>
-  </nav>
-</header>
-
-<main class="layout">
-  <!-- 仓库列表 -->
-  <section class="col repos">
-    <div class="col-head">
-      <h3 data-i18n="repos">仓库</h3>
-      <div class="tools">
-        <button id="btnReloadRepos" class="icon" title="刷新">⟳</button>
+  <header class="topbar">
+    <a class="brand" href="./">
+      <img src="../assets/logo.svg" alt="XGit" />
+      <span>XGit <b>Web</b></span>
+    </a>
+    <nav class="actions">
+      <button id="btnSign" class="btn primary" data-i18n="signIn">用 Token 登录</button>
+      <div class="langs">
+        <button class="chip" id="langZh">中文</button>
+        <button class="chip" id="langEn">EN</button>
       </div>
-    </div>
-    <div id="repoList" class="list placeholder">
-      <div class="empty" data-i18n="pleaseLogin">请先登录</div>
-    </div>
-  </section>
+    </nav>
+  </header>
 
-  <!-- 文件树 -->
-  <section class="col tree">
-    <div class="col-head">
-      <h3 class="ellipsis" id="repoTitle">—</h3>
-      <div class="tools">
-        <button id="btnUp" class="icon" title="上一级">⬆</button>
-        <button id="btnRoot" class="icon" title="根目录">⌂</button>
-        <button id="btnRefreshTree" class="icon" title="刷新">⟳</button>
+  <main class="page">
+    <!-- 欢迎 -->
+    <section class="card" id="welcomeCard">
+      <div class="hero">
+        <img class="logo" src="../assets/logo.svg" alt="XGit" />
       </div>
-    </div>
-
-    <div class="pathbar">
-      <span id="branchBadge" class="badge">main</span>
-      <div id="crumbs" class="crumbs"></div>
-    </div>
-
-    <div id="treeList" class="list placeholder">
-      <div class="empty" data-i18n="selectRepoTip">选择一个仓库以浏览文件</div>
-    </div>
-  </section>
-
-  <!-- 预览区 -->
-  <section class="col viewer">
-    <div class="col-head">
-      <h3 class="ellipsis" id="fileTitle" data-i18n="viewer">预览</h3>
-      <div class="tools">
-        <button id="btnDownloadRaw" class="icon" title="下载原文件" style="display:none">⬇</button>
+      <h1 data-i18n="welcomeTitle">欢迎使用 XGit Web</h1>
+      <p class="sub" data-i18n="welcomeSub">随时随地，轻松管理你的 GitHub 仓库。</p>
+      <div class="row gap">
+        <button id="btnSign2" class="btn primary" data-i18n="signIn">用 Token 登录</button>
+        <a id="backToSite" class="btn ghost" href="https://xgit.ximory.com" data-i18n="backToSite">返回官网</a>
       </div>
-    </div>
-    <div id="viewerBody" class="viewer-body">
-      <div class="welcome">
-        <div class="hero-logo"><img src="./assets/logo.svg" alt="logo"></div>
-        <h2 data-i18n="welcome">欢迎使用 XGit Web</h2>
-        <p class="muted" data-i18n="tagline">随时随地，轻松管理你的 GitHub 仓库。</p>
-        <div class="actions">
-          <button id="btnLogin2" class="btn primary" data-i18n="loginByToken">用 Token 登录</button>
-          <button id="btnBack" class="btn" data-i18n="backToSite">返回官网</button>
+
+      <div id="userBox" class="userbox hidden">
+        <img id="userAvatar" class="avatar" alt="" />
+        <div class="uinfo">
+          <div class="uname" id="userName">-</div>
+          <div class="ustate" id="userState" data-i18n="signedIn">已登录</div>
+        </div>
+        <div class="uright">
+          <button id="btnRefresh" class="chip" data-i18n="refresh">刷新</button>
+          <button id="btnSignOut" class="chip danger" data-i18n="signOut">退出登录</button>
         </div>
       </div>
-    </div>
-  </section>
-</main>
+    </section>
 
-<script src="./i18n.js"></script>
-<script src="./web.js"></script>
+    <!-- 仓库列表（预留卡片，未登录时灰空） -->
+    <section class="card" id="repoCard">
+      <div class="card-head">
+        <h2 data-i18n="repos">仓库</h2>
+        <button id="repoReload" class="iconbtn" title="Reload">⟳</button>
+      </div>
+      <div id="repoEmpty" class="empty" data-i18n="pleaseSignIn">请先登录</div>
+      <ul id="repoList" class="list hidden"></ul>
+    </section>
+  </main>
+
+  <script src="./web.js"></script>
 </body>
 </html>
