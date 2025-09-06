@@ -137,10 +137,16 @@
             <span data-zh>规划中</span><span data-en>Planned</span>
           </span>
         </div>
-        <p>
-          <span data-zh>支持打包下载目录，上传 ZIP 并解包入仓。</span>
-          <span data-en>Download folders as ZIP; upload ZIP and unpack into repo.</span>
-        </p>
+       <p class="i18n">
+  <span data-zh>
+    支持打包下载目录，上传 ZIP 并解包入仓；基于「ZIP 协议」的一次打包/一次解压协作方式，
+    既可整包也可做增量（规划中），上下文完整、便于回退与比对。
+  </span>
+  <span data-en>
+    Download folders as ZIP and upload ZIP to unpack into the repo. Powered by the “ZIP Protocol”:
+    one-shot package/unzip collaboration with full context; full or incremental (planned), snapshot-friendly.
+  </span>
+</p>
       </div>
     </div>
   </section>
@@ -220,6 +226,42 @@
         <div class="q"><span data-zh>移动端体验如何？</span><span data-en>Mobile experience?</span></div>
         <div class="a"><span data-zh>采用单屏栈式导航，操作更顺手。</span><span data-en>Single-screen stack navigation for smooth operations.</span></div>
       </div>
+      <!-- ZIP 协议：是什么 -->
+<div class="qa i18n">
+  <div class="q">
+    <span data-zh>什么是 ZIP 协议？</span>
+    <span data-en>What is the ZIP Protocol?</span>
+  </div>
+  <div class="a">
+    <span data-zh>
+      XGit 提出的轻量协作通道：把目录与资源一次打包（ZIP）进行交互，保证上下文完整；后续支持“增量 ZIP”（仅含变化文件）
+      与快照式留存，特别适合与 AI 协作（人类打包 → AI 理解输出 ZIP → 人类验证）。
+    </span>
+    <span data-en>
+      A lightweight collaboration channel by XGit: exchange folders as ZIP to preserve full context.
+      Incremental ZIP (changed files only) and snapshot history are planned — ideal for AI workflows
+      (human package → AI produce ZIP → human verify).
+    </span>
+  </div>
+</div>
+
+<!-- ZIP 协议：为何优于复制粘贴 -->
+<div class="qa i18n">
+  <div class="q">
+    <span data-zh>为什么比复制粘贴更高效？</span>
+    <span data-en>Why is it better than copy & paste?</span>
+  </div>
+  <div class="a">
+    <span data-zh>
+      复制粘贴容易零碎且丢上下文；ZIP 协议把目录结构、静态资源与配置一次性带上，
+      一次传输、一解即用，减少来回对齐与遗漏，并天然形成“版本快照”，便于回退与对比。
+    </span>
+    <span data-en>
+      Copy-paste is fragmented and loses context. The ZIP Protocol ships structure, assets and configs together:
+      one transfer, one unzip, ready to run. It naturally creates “snapshots” for rollbacks and diffing.
+    </span>
+  </div>
+</div>
     </div>
   </section>
 
