@@ -16,7 +16,8 @@ const dict = {
     welcomeSub: '随时随地，轻松管理你的 GitHub 仓库。',
     signedIn: '已登录',
     repos: '仓库',
-    pleaseSignIn: '请先登录'
+    pleaseSignIn: '请先登录',
+    noRepos: '没有可显示的仓库'
   },
   en: {
     signIn: 'Sign in with Token',
@@ -27,15 +28,14 @@ const dict = {
     welcomeSub: 'Manage your GitHub repos on the go.',
     signedIn: 'Signed in',
     repos: 'Repositories',
-    pleaseSignIn: 'Please sign in first'
+    pleaseSignIn: 'Please sign in first',
+    noRepos: 'No repositories to show'
   }
 };
 
 function t(key){
-  // 优先当前语言，找不到回退到中文，再回退 key
   return (dict[lang] && dict[lang][key]) ?? (dict.zh[key] ?? key);
 }
-
 function applyI18n(){
   $$('[data-i18n]').forEach(el => {
     const key = el.getAttribute('data-i18n');
@@ -44,30 +44,49 @@ function applyI18n(){
   document.documentElement.lang = lang === 'zh' ? 'zh' : 'en';
 }
 
-/* ---------- auth ---------- */
+/* ---------- auth/API ---------- */
 const LS_TOKEN = 'xgit_token';
 
-async function api(path){
-  const token = localStorage.getItem(LS_TOKEN);
-  const res = await fetch(`https://api.github.com${path}`, {
-    headers: token ? { 'Authorization': `token ${token}` } : {}
-  });
-  if(!res.ok) throw new Error(`${res.status}`);
-  return res.json();
-}
+async function fetchJson(url, token){
+  // 兼容经典 token 与 fine-grained（有的更偏好 Bearer）
+  const baseHeaders = {'Accept':'application/vnd.github+json'};
+  const tryOrder = token ? [
+    { Authorization: `Bearer ${token}`, ...baseHeaders },
+    { Authorization: `token ${token}`,  ...baseHeaders },
+  ] : [ baseHeaders ];
 
-async function validateToken(){
-  const token = localStorage.getItem(LS_TOKEN);
-  if(!token) return null;
-  try{
-    const me = await api('/user');
-    return me;
-  }catch(e){
-    console.warn('token invalid', e);
-    return null;
+  let lastErr;
+  for (const headers of tryOrder){
+    try{
+      const r = await fetch(url, { headers });
+      if (!r.ok) throw new Error('HTTP '+r.status);
+      return await r.json();
+    }catch(e){ lastErr = e; }
   }
+  throw lastErr || new Error('request failed');
 }
 
+async function apiMe(){ 
+  const tk = localStorage.getItem(LS_TOKEN);
+  if(!tk) throw new Error('no token');
+  return fetchJson('https://api.github.com/user', tk);
+}
+
+async function apiRepos({ page=1, per_page=100 }={}){
+  const tk = localStorage.getItem(LS_TOKEN);
+  if(!tk) throw new Error('no token');
+  // visibility+affiliation 尽量覆盖自有/协作/组织
+  const qs = new URLSearchParams({
+    per_page: String(per_page),
+    page: String(page),
+    sort: 'updated',
+    affiliation: 'owner,collaborator,organization_member',
+    visibility: 'all'
+  }).toString();
+  return fetchJson(`https://api.github.com/user/repos?${qs}`, tk);
+}
+
+/* ---------- UI 状态 ---------- */
 function setSignedUI(me){
   if(me){
     $('#userBox').classList.remove('hidden');
@@ -87,48 +106,107 @@ function setSignedUI(me){
     delete $('#btnSign2').dataset.mode;
     $('#userAvatar').removeAttribute('src');
     $('#userName').textContent = '-';
+    // 清空仓库列表
+    $('#repoList').classList.add('hidden');
+    $('#repoList').innerHTML = '';
   }
 }
 
-/* ---------- events ---------- */
+/* ---------- 登录流 ---------- */
+async function validateToken(){
+  const token = localStorage.getItem(LS_TOKEN);
+  if(!token) return null;
+  try{ return await apiMe(); }catch{ return null; }
+}
+
 async function signInFlow(){
-  const token = prompt('GitHub Personal Access Token (建议只勾选 repo 权限 / Fine-grained 也可)：');
+  const token = prompt('GitHub Personal Access Token（建议仅勾选 repo / 或 Fine-grained Read）:');
   if(!token) return;
   localStorage.setItem(LS_TOKEN, token.trim());
   const me = await validateToken();
   if(me){
     setSignedUI(me);
-    // 预留：后续加载仓库列表
-    // loadRepos();
+    await loadRepos(); // ★ 登录成功后立刻加载仓库
     alert(lang==='zh'?'登录成功':'Signed in');
   }else{
     localStorage.removeItem(LS_TOKEN);
     alert(lang==='zh'?'Token 无效':'Invalid token');
   }
 }
-
 async function signOutFlow(){
   localStorage.removeItem(LS_TOKEN);
   setSignedUI(null);
 }
-
 async function refreshFlow(){
   const me = await validateToken();
   setSignedUI(me);
+  if(me) await loadRepos(); // ★ 刷新时也重载仓库
 }
 
-/* ---------- repos (占位) ---------- */
+/* ---------- 仓库列表：实现渲染 ---------- */
 async function loadRepos(){
   const token = localStorage.getItem(LS_TOKEN);
   if(!token){ return; }
-  // 先给空列表占位，后续会实现真正的拉取
+
+  // 简单加载（前 100 个）
+  let repos = [];
+  try{
+    repos = await apiRepos({ per_page: 100, page: 1 });
+  }catch(e){
+    console.warn(e);
+    $('#repoList').classList.remove('hidden');
+    $('#repoList').innerHTML = `<li>${esc(lang==='zh'?'加载仓库失败':'Failed to load repositories')}</li>`;
+    return;
+  }
+
+  // 渲染
   $('#repoList').classList.remove('hidden');
-  $('#repoList').innerHTML = '';
+  if(!repos || repos.length===0){
+    $('#repoList').innerHTML = `<li>${esc(t('noRepos'))}</li>`;
+    return;
+  }
+
+  const html = repos.map(r=>{
+    const privacy = r.private ? '🔒' : '🌐';
+    const full = `${r.owner?.login || ''}/${r.name}`;
+    const langTag = r.language ? `<span class="tag">${esc(r.language)}</span>` : '';
+    const br = r.default_branch || 'main';
+    const updated = r.pushed_at ? new Date(r.pushed_at).toLocaleString() : '';
+    return `<li class="repo" data-owner="${esc(r.owner.login)}" data-repo="${esc(r.name)}" data-branch="${esc(br)}">
+      <div class="row">
+        <div class="left">
+          <div class="name">${privacy} ${esc(full)}</div>
+          <div class="meta">
+            ${langTag}
+            <span class="tag">branch: ${esc(br)}</span>
+            <span class="tag">updated: ${esc(updated)}</span>
+          </div>
+        </div>
+        <div class="right">
+          <a class="chip" href="${esc(r.html_url)}" target="_blank" rel="noreferrer">GitHub</a>
+        </div>
+      </div>
+    </li>`;
+  }).join('');
+
+  $('#repoList').innerHTML = html;
+
+  // （预留）点击进入仓库：下一步接文件树
+  $$('#repoList .repo').forEach(li=>{
+    li.onclick = ()=>{
+      const owner = li.dataset.owner;
+      const repo  = li.dataset.repo;
+      const br    = li.dataset.branch;
+      console.log('open repo:', owner, repo, br);
+      alert((lang==='zh'?'即将打开仓库：':'Open repo: ') + `${owner}/${repo} (${br})`);
+      // TODO: 下一步接入：openRepo(owner, repo, br);
+    };
+  });
 }
 
-/* ---------- boot ---------- */
+/* ---------- 绑定 & 启动 ---------- */
 function bind(){
-  // 多个“登录”按钮共用一套逻辑
+  // 登录按钮（顶部与欢迎卡片共用逻辑）
   ['btnSign','btnSign2'].forEach(id=>{
     $('#'+id).onclick = async (e)=>{
       if(e.currentTarget.dataset.mode === 'out'){ await signOutFlow(); }
@@ -140,22 +218,18 @@ function bind(){
   $('#repoReload').onclick = loadRepos;
 
   // 语言切换
-  $('#langZh').onclick = ()=>{ lang='zh'; localStorage.setItem('xgit_lang',lang); applyI18n(); setTimeout(refreshFlow,0); };
-  $('#langEn').onclick = ()=>{ lang='en'; localStorage.setItem('xgit_lang',lang); applyI18n(); setTimeout(refreshFlow,0); };
-
-  // “返回官网”在同一窗口打开（保持当前 a 行为即可）
-  $('#backToSite').onclick = ()=>{ /* 默认同窗，无需 window.open */ };
+  $('#langZh').onclick = ()=>{ lang='zh'; localStorage.setItem('xgit_lang',lang); applyI18n(); };
+  $('#langEn').onclick = ()=>{ lang='en'; localStorage.setItem('xgit_lang',lang); applyI18n(); };
 }
 
 async function boot(){
   // 恢复语言
   const saved = localStorage.getItem('xgit_lang');
   if(saved) lang = saved;
-
   applyI18n();
   bind();
 
-  // 首次渲染登录状态
+  // 首次渲染登录状态 & 仓库
   const me = await validateToken();
   setSignedUI(me);
   if(me) await loadRepos();
