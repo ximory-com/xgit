@@ -50,3 +50,59 @@ tbody tr:last-child td{border-bottom:none}
 .faq{padding-left:18px}
 .faq li{margin:8px 0}
 .foot{display:flex;gap:8px;justify-content:center;align-items:center;color:var(--muted);padding:20px;border-top:1px solid var(--line)}
+
+/* ---- Layout base ---- */
+.container { max-width: 980px; margin: 0 auto; padding: 0 16px; }
+
+/* ---- Top bar ---- */
+.top {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px;
+  backdrop-filter: saturate(1.4) blur(6px);
+  background: rgba(255,255,255,.75);
+  border-bottom: 1px solid #eef1f4;
+}
+.top .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+.top .brand .logo { width: 28px; height: 28px; }
+.top .brand span { font-weight: 700; color: #0b1324; font-size: 18px; }
+.top .nav { display: flex; align-items: center; gap: 14px; }
+.top .nav .nav-link { color: #0b1324; text-decoration: none; opacity: .85; }
+.top .nav .nav-link:hover { opacity: 1; }
+.top select { appearance: none; border: 1px solid #e2e6ef; background: #fff; padding: 6px 10px; border-radius: 10px; }
+
+/* ---- Hero ---- */
+.hero {
+  display: grid; gap: 18px;
+  grid-template-columns: 1fr;
+  align-items: center;
+  padding: 26px 16px 10px;
+}
+.hero .hero-text .lead { color: #5b6372; line-height: 1.65; margin-top: 12px; }
+.actions { display: flex; gap: 12px; margin-top: 18px; flex-wrap: wrap; }
+
+.btn { padding: 10px 16px; border-radius: 12px; border: 1px solid #dfe4ee; text-decoration: none; color: #0b1324; background: #fff; }
+.btn:hover { border-color: #cfd6e6; }
+.btn-primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+.btn-primary:hover { background: #1e4fd0; border-color: #1e4fd0; }
+
+/* 大 LOGO：撑住右半屏，移动端不至于太大 */
+.hero .hero-art { display: flex; justify-content: center; }
+.hero .hero-art img {
+  width: min(52vw, 360px);
+  height: auto;
+  filter: drop-shadow(0 10px 28px rgba(37,99,235,.15));
+  border-radius: 24px;
+}
+
+/* 桌面端：左右分栏，提高饱满度 */
+@media (min-width: 900px) {
+  .hero {
+    grid-template-columns: 1.2fr .8fr;
+    padding: 48px 0 24px;
+  }
+  .top .brand .logo { width: 30px; height: 30px; }
+}
+
+/* 让主体块跟 container 对齐（若你已有容器可忽略） */
+main, .hero { width: 100%; }
