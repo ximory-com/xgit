@@ -15,8 +15,12 @@
   </a>
 
   <nav class="nav">
-    <button id="btnLogin" class="btn primary" data-i18n="loginByToken">用 Token 登录</button>
-    <button id="btnLogout" class="btn" style="display:none" data-i18n="logout">退出登录</button>
+    <span class="user">
+      <img id="userAvatar" alt="" style="display:none">
+      <b id="userName" class="ellipsis"></b>
+    </span>
+    <button id="btnLogin"  class="btn primary" data-i18n="loginByToken">用 Token 登录</button>
+    <button id="btnLogout" class="btn"        style="display:none" data-i18n="logout">退出登录</button>
     <div class="lang">
       <button id="langZh" class="chip">中文</button>
       <button id="langEn" class="chip">EN</button>
@@ -24,26 +28,59 @@
   </nav>
 </header>
 
-<main class="container">
-  <section class="card hero">
-    <div class="hero-logo">
-      <img src="./assets/logo.svg" alt="XGit Logo">
-    </div>
-    <h1 data-i18n="welcome">欢迎使用 XGit Web</h1>
-    <p class="muted" data-i18n="tagline">随时随地，轻松管理你的 GitHub 仓库。</p>
-
-    <div class="actions">
-      <button id="btnLogin2" class="btn primary" data-i18n="loginByToken">用 Token 登录</button>
-      <button id="btnBack" class="btn" data-i18n="backToSite">返回官网</button>
-    </div>
-
-    <div id="userBox" class="user" style="display:none">
-      <img id="userAvatar" alt="avatar">
-      <div class="meta">
-        <div id="userName">—</div>
-        <div id="userStatus" class="muted" data-i18n="loginOk">已登录</div>
+<main class="layout">
+  <!-- 仓库列表 -->
+  <section class="col repos">
+    <div class="col-head">
+      <h3 data-i18n="repos">仓库</h3>
+      <div class="tools">
+        <button id="btnReloadRepos" class="icon" title="刷新">⟳</button>
       </div>
-      <button id="btnRefresh" class="btn tiny" data-i18n="refresh">刷新</button>
+    </div>
+    <div id="repoList" class="list placeholder">
+      <div class="empty" data-i18n="pleaseLogin">请先登录</div>
+    </div>
+  </section>
+
+  <!-- 文件树 -->
+  <section class="col tree">
+    <div class="col-head">
+      <h3 class="ellipsis" id="repoTitle">—</h3>
+      <div class="tools">
+        <button id="btnUp" class="icon" title="上一级">⬆</button>
+        <button id="btnRoot" class="icon" title="根目录">⌂</button>
+        <button id="btnRefreshTree" class="icon" title="刷新">⟳</button>
+      </div>
+    </div>
+
+    <div class="pathbar">
+      <span id="branchBadge" class="badge">main</span>
+      <div id="crumbs" class="crumbs"></div>
+    </div>
+
+    <div id="treeList" class="list placeholder">
+      <div class="empty" data-i18n="selectRepoTip">选择一个仓库以浏览文件</div>
+    </div>
+  </section>
+
+  <!-- 预览区 -->
+  <section class="col viewer">
+    <div class="col-head">
+      <h3 class="ellipsis" id="fileTitle" data-i18n="viewer">预览</h3>
+      <div class="tools">
+        <button id="btnDownloadRaw" class="icon" title="下载原文件" style="display:none">⬇</button>
+      </div>
+    </div>
+    <div id="viewerBody" class="viewer-body">
+      <div class="welcome">
+        <div class="hero-logo"><img src="./assets/logo.svg" alt="logo"></div>
+        <h2 data-i18n="welcome">欢迎使用 XGit Web</h2>
+        <p class="muted" data-i18n="tagline">随时随地，轻松管理你的 GitHub 仓库。</p>
+        <div class="actions">
+          <button id="btnLogin2" class="btn primary" data-i18n="loginByToken">用 Token 登录</button>
+          <button id="btnBack" class="btn" data-i18n="backToSite">返回官网</button>
+        </div>
+      </div>
     </div>
   </section>
 </main>
