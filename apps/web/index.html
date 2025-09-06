@@ -3,104 +3,52 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>XGit Web</title>
-  <link rel="icon" href="./assets/logo.png">
+  <title>XGit • Web App</title>
   <link rel="stylesheet" href="./web.css">
+  <link rel="icon" href="./assets/logo.png">
 </head>
 <body>
-  <!-- 顶部栏 -->
-  <header class="topbar">
-    <div class="left">
-      <img src="./assets/logo.svg" alt="XGit" class="logo">
-      <span class="ttl">XGit Web</span>
+<header class="top">
+  <a class="brand" href="javascript:void(0);" id="toSite">
+    <img src="./assets/logo.svg" alt="XGit" class="logo">
+    <span>XGit Web</span>
+  </a>
+
+  <nav class="nav">
+    <button id="btnLogin" class="btn primary" data-i18n="loginByToken">用 Token 登录</button>
+    <button id="btnLogout" class="btn" style="display:none" data-i18n="logout">退出登录</button>
+    <div class="lang">
+      <button id="langZh" class="chip">中文</button>
+      <button id="langEn" class="chip">EN</button>
     </div>
-    <div class="right">
-      <button id="loginBtn" class="btn">用 Token 登录</button>
-      <button id="logoutBtn" class="btn ghost" hidden>退出</button>
-      <a class="btn link" href="https://xgit.ximory.com/" target="_blank" rel="noopener">官网</a>
+  </nav>
+</header>
+
+<main class="container">
+  <section class="card hero">
+    <div class="hero-logo">
+      <img src="./assets/logo.svg" alt="XGit Logo">
     </div>
-  </header>
+    <h1 data-i18n="welcome">欢迎使用 XGit Web</h1>
+    <p class="muted" data-i18n="tagline">随时随地，轻松管理你的 GitHub 仓库。</p>
 
-  <!-- 主区域：移动端栈式，桌面三栏 -->
-  <main class="main">
-    <!-- A. Home / 欢迎页 -->
-    <section id="home" class="panel active">
-      <div class="home">
-        <img src="./assets/logo.svg" class="home-logo" alt="XGit">
-        <h1>欢迎使用 XGit Web</h1>
-        <p class="sub">随时随地，轻松管理你的 GitHub 仓库。</p>
-        <div class="row actions">
-          <button id="goLogin" class="btn primary">用 Token 登录</button>
-          <a class="btn" href="https://xgit.ximory.com/" target="_blank" rel="noopener">返回官网</a>
-        </div>
+    <div class="actions">
+      <button id="btnLogin2" class="btn primary" data-i18n="loginByToken">用 Token 登录</button>
+      <button id="btnBack" class="btn" data-i18n="backToSite">返回官网</button>
+    </div>
 
-        <div id="homeAuthed" class="authed" hidden>
-          <div class="hi">Hi, <span id="hiUser">@user</span></div>
-          <div class="row">
-            <button id="openRepos" class="btn">进入仓库列表</button>
-            <button id="openLast" class="btn" disabled>打开上次的仓库</button>
-          </div>
-          <div class="recent">
-            <div class="title">最近仓库</div>
-            <div id="recentRepos" class="list"></div>
-          </div>
-        </div>
+    <div id="userBox" class="user" style="display:none">
+      <img id="userAvatar" alt="avatar">
+      <div class="meta">
+        <div id="userName">—</div>
+        <div id="userStatus" class="muted" data-i18n="loginOk">已登录</div>
       </div>
-    </section>
+      <button id="btnRefresh" class="btn tiny" data-i18n="refresh">刷新</button>
+    </div>
+  </section>
+</main>
 
-    <!-- B. 仓库列表（桌面：左栏） -->
-    <section id="repos" class="panel">
-      <div class="panel-ttl">仓库</div>
-      <div id="reposList" class="list"></div>
-    </section>
-
-    <!-- C. 目录浏览（桌面：中栏） -->
-    <section id="tree" class="panel">
-      <div class="panel-ttl row space">
-        <div id="breadcrumb" class="crumbs">/</div>
-        <div class="row">
-          <button id="navUp" class="btn ghost">上一级</button>
-          <button id="navRoot" class="btn ghost">根目录</button>
-          <button id="navRefresh" class="btn ghost">刷新</button>
-        </div>
-      </div>
-      <div id="treeList" class="list"></div>
-    </section>
-
-    <!-- D/E. 文件编辑 + Changes（桌面：右栏 Tab） -->
-    <section id="editor" class="panel">
-      <div class="tabs">
-        <button class="tab active" data-tab="file">文件</button>
-        <button class="tab" data-tab="changes">Changes</button>
-      </div>
-
-      <!-- 文件 -->
-      <div id="filePane" data-pane="file" class="pane active">
-        <div class="fileMeta row space">
-          <div id="filePath" class="muted">未打开文件</div>
-          <div class="row">
-            <button id="toggleEdit" class="btn ghost" disabled>编辑</button>
-            <button id="discardLocal" class="btn ghost" disabled>撤销本地更改</button>
-          </div>
-        </div>
-        <textarea id="textViewer" class="code" placeholder="选择一个文本文件查看/编辑…" disabled></textarea>
-        <div id="binaryHint" class="hint" hidden>此文件为二进制或暂不支持预览。</div>
-        <div id="imageWrap" class="image" hidden><img id="imagePreview" alt=""></div>
-      </div>
-
-      <!-- Changes -->
-      <div id="changesPane" data-pane="changes" class="pane">
-        <div id="changesList" class="changes"></div>
-        <div class="commitBar">
-          <input id="commitMsg" class="input" placeholder="Commit message">
-          <button id="commitAll" class="btn primary">提交选中</button>
-        </div>
-      </div>
-    </section>
-  </main>
-
-  <script src="./github.js"></script>
-  <script src="./auth.js"></script>
-  <script src="./web.js"></script>
+<script src="./i18n.js"></script>
+<script src="./web.js"></script>
 </body>
 </html>
