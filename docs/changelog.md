@@ -1,21 +1,20 @@
-# Changelog
-
-## v0.1.1
-🛠 修复 | Fixes
-- 修复 site 与 web 应用中 LOGO 路径错误（由 `/apps/assets/logo.svg` 改为 `./assets/logo.svg`）  
-- 解决 Vercel 部署后 LOGO 无法显示的问题  
-
-- Fixed incorrect logo path in site and web apps (changed from `/apps/assets/logo.svg` to `./assets/logo.svg`)  
-- Fixed issue where logo was not displayed after Vercel deployment  
+# XGit 更新日志
 
 ---
 
-## v0.1.0
-🎉 初始化发布 | Initial Release
-- 建立仓库结构（apps, assets, docs）  
-- 添加 README, LICENSE, 以及初始文档文件  
-- 提供 site/web/ios/android/wechat 基础目录与 LOGO 占位  
+## v0.1.1 (2025-09-06)
 
-- Setup repository structure (apps, assets, docs)  
-- Added README, LICENSE, and initial documentation files  
-- Provided base directories and logo placeholders for site/web/ios/android/wechat  
+- 调大导航 LOGO，提升视觉识别度  
+- 修复「立即体验」按钮链接到 Web App  
+- 修复中英文切换时差异表格内容重复问题  
+- 文案精修，增加功能状态徽标，优化交互与视觉效果  
+
+---
+
+## v0.1.0 (2025-09-05)
+
+- 初始化项目结构（apps、assets、docs）  
+- 官网 site 初版上线，支持中英文切换  
+- 添加基本功能清单、对比表、FAQ  
+- 引入 LOGO（SVG/PNG 双版本）  
+- 添加 LICENSE、README、基础文档（roadmap, conventions, vercel 等）

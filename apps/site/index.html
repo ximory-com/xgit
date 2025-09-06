@@ -1,110 +1,122 @@
 <!doctype html>
 <html lang="zh">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>XGit · 更顺手的 Git 编辑器</title>
-  <link rel="icon" href="./assets/logo.svg">
-  <link rel="apple-touch-icon" href="./assets/logo.png">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>XGit • 官网</title>
+  <link rel="icon" href="./assets/logo.png">
   <link rel="stylesheet" href="./site.css">
 </head>
 <body>
-  <!-- 顶部 Hero -->
-  <header class="hero">
-    <div class="brand">
-      <img class="logo" src="./assets/logo.svg" alt="XGit">
-      <div>
-        <h1 id="heroTitle">随时随地，轻松管理你的 GitHub 仓库</h1>
-        <p id="heroSub" class="sub">XGit 是一款专为移动端设计的轻量级 GitHub 客户端，让你在手机上也能流畅地查看、编辑与提交代码。</p>
-      </div>
-    </div>
-    <div class="cta">
-      <a class="btn primary" href="../web/index.html" id="btnTry">立即体验</a>
-      <a class="btn" target="_blank" href="https://github.com/ximory-com/xgit" id="btnRepo">GitHub 仓库</a>
-      <select id="langSwitch" class="btn">
+  <header class="top">
+    <a class="brand" href="./">
+      <img src="./assets/logo.svg" class="logo" alt="XGit Logo">
+      <span>XGit</span>
+    </a>
+    <nav class="nav">
+      <a id="btnTry" class="btn primary" href="https://app.xgit.ximory.com/" data-i18n="cta_try">立即体验</a>
+      <a id="btnRepo" class="btn ghost" target="_blank" rel="noopener" href="https://github.com/ximory-com/xgit" data-i18n="cta_repo">GitHub 仓库</a>
+      <select id="langSwitch" aria-label="language">
         <option value="zh">中文</option>
         <option value="en">English</option>
       </select>
-    </div>
+    </nav>
   </header>
 
-  <!-- 进度条 & 筛选 -->
-  <section class="tracker">
-    <div class="toolbar">
-      <div class="progress">
-        <div id="progressBar" class="bar"><span id="progressText">0%</span></div>
+  <main>
+    <!-- Hero -->
+    <section class="hero">
+      <h1 data-i18n="hero_title">随时随地，轻松管理你的 GitHub 仓库</h1>
+      <p class="sub" data-i18n="hero_sub">
+        XGit 是一款专为移动端设计的轻量级 GitHub 客户端，让你在手机上也能流畅地查看、编辑与提交代码。
+      </p>
+      <div class="cta-row">
+        <a class="btn primary" href="https://app.xgit.ximory.com/" data-i18n="cta_try">立即体验</a>
+        <a class="btn" target="_blank" rel="noopener" href="https://github.com/ximory-com/xgit" data-i18n="cta_repo">GitHub 仓库</a>
       </div>
-      <div class="filters">
-        <select id="statusFilter">
-          <option value="all">全部</option>
-          <option value="done">已实现</option>
-          <option value="wip">开发中</option>
-          <option value="plan">规划中</option>
-        </select>
-        <input id="searchBox" type="search" placeholder="搜索功能…">
-      </div>
-    </div>
-  </section>
-
-  <!-- 功能分组 -->
-  <main class="groups">
-    <section class="group">
-      <h2 id="secBasic">基础功能</h2>
-      <div id="group-basic" class="cards"></div>
     </section>
 
-    <section class="group">
-      <h2 id="secAdv">增强功能</h2>
-      <div id="group-adv" class="cards"></div>
+    <!-- 功能清单（带状态） -->
+    <section>
+      <h2 data-i18n="feat_title">基础功能</h2>
+
+      <div class="card">
+        <div class="card-h">
+          <span data-i18n="f_repo_list">仓库列表</span>
+          <span class="status planned" data-i18n="status_planned">规划中</span>
+        </div>
+        <p data-i18n="f_repo_list_desc">
+          登录后展示我的仓库，支持搜索与最近活跃排序。
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="card-h">
+          <span data-i18n="f_tree">目录浏览</span>
+          <span class="status planned" data-i18n="status_planned">规划中</span>
+        </div>
+        <p data-i18n="f_tree_desc">
+          逐层进入（移动端单屏），桌面端三栏回退。
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="card-h">
+          <span data-i18n="f_edit">文件查看/编辑（文本）</span>
+          <span class="status planned" data-i18n="status_planned">规划中</span>
+        </div>
+        <p data-i18n="f_edit_desc">基础编辑可用，后续切换 Monaco。</p>
+      </div>
     </section>
 
-    <section class="group">
-      <h2 id="secPro">高阶功能</h2>
-      <div id="group-pro" class="cards"></div>
+    <!-- 对比 -->
+    <section>
+      <h2 data-i18n="cmp_title">与 GitHub 官方 App/Web 的差异</h2>
+      <div class="table-wrap">
+        <table class="cmp">
+          <thead>
+            <tr>
+              <th data-i18n="cmp_feat">功能</th>
+              <th data-i18n="cmp_gh">GitHub App/Web</th>
+              <th data-i18n="cmp_xgit">XGit</th>
+            </tr>
+          </thead>
+          <tbody id="cmpBody"><!-- JS render --></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 定位 & FAQ -->
+    <section>
+      <h2 data-i18n="pos_title">产品定位</h2>
+      <p data-i18n="pos_desc">
+        只把 <b>仓库相关操作</b> 做到极致：浏览 / 编辑 / Diff / 多文件一次提交 / 历史 / 分支 / 上传下载。不做 Issues/PR 等复杂协作（必要时仅跳转）。
+      </p>
+
+      <h2>FAQ</h2>
+      <ul class="faq">
+        <li>
+          <b data-i18n="faq_q1">需要服务器吗？</b>
+          <span data-i18n="faq_a1">不需要，全部在前端完成，直接对接 GitHub API。</span>
+        </li>
+        <li>
+          <b data-i18n="faq_q2">支持私有仓库吗？</b>
+          <span data-i18n="faq_a2">支持，只需授权 Token（建议 scope: repo）。</span>
+        </li>
+        <li>
+          <b data-i18n="faq_q3">移动端体验如何？</b>
+          <span data-i18n="faq_a3">采用单屏栈式导航（逐层进入），操作更顺手。</span>
+        </li>
+      </ul>
     </section>
   </main>
 
-  <!-- 对比 -->
-  <section class="compare">
-    <h2 id="cmpTitle">与 GitHub 官方 App/Web 的差异</h2>
-    <div class="table-wrap">
-      <table class="cmp">
-        <thead>
-          <tr>
-            <th id="cmpFeature">功能</th>
-            <th>GitHub App/Web</th>
-            <th>XGit</th>
-          </tr>
-        </thead>
-        <tbody id="cmpBody">
-          <!-- 由脚本填充 -->
-        </tbody>
-      </table>
-    </div>
-  </section>
-
-  <!-- 说明 & FAQ -->
-  <section class="notes">
-    <h3 id="posTitle">产品定位</h3>
-    <p id="posText">
-      只把 <b>仓库相关操作</b> 做到极致：浏览 / 编辑 / Diff / 多文件一次提交 / 历史 / 分支 / 上传下载。<br>
-      不做 Issues/PR 等复杂协作台功能（必要时只读跳转）。
-    </p>
-
-    <h3>FAQ</h3>
-    <ul id="faqList">
-      <!-- 由脚本填充 -->
-    </ul>
-  </section>
-
   <footer class="foot">
-    <span id="footCopy">版权所有 © 2025 Ximory</span>
-    <span class="sep">·</span>
-    <span id="footPoem">与光同曜，随江河起落，合天地吐纳</span>
-    <span class="sep">·</span>
-    <span id="footVer">XGit v0.1.0</span>
+    <span>© 2025 Ximory</span>
+    <span>•</span>
+    <span>v0.1.0</span>
   </footer>
 
-  <script type="module" src="./site.js"></script>
+  <script src="./site.js"></script>
 </body>
 </html>
