@@ -10,8 +10,11 @@
 <body>
 <header class="top">
   <a class="brand" href="/apps/site/">
-    <img src="./assets/logo.svg" alt="XGit" class="logo" />
-    <span>XGit</span>
+  <!-- 大 LOGO（英雄区） -->
+<div class="hero-visual">
+  <img src="./assets/logo.svg" alt="XGit logo" class="hero-logo">
+</div>
+  <span>XGit</span>
   </a>
 
   <nav class="nav">
@@ -23,21 +26,20 @@
     </select>
   </nav>
 </header>
-
+<!-- Hero -->
 <section class="hero">
   <div class="hero-text">
-    <h1 id="headline" data-i18n="headline">随时随地，轻松管理你的 GitHub 仓库</h1>
-    <p id="subhead" class="lead" data-i18n="subhead">
-      XGit 是一款专为移动端设计的轻量级 GitHub 客户端，让你在手机上也能流畅地查看、编辑与提交代码。
-    </p>
-    <div class="actions">
-      <a id="ctaTry" class="btn btn-primary" href="https://app.xgit.ximory.com/" data-i18n="ctaTry">立即体验</a>
-      <a id="ctaRepo" class="btn" href="https://github.com/ximory-com/xgit" data-i18n="ctaRepo">GitHub 仓库</a>
+    <h1 id="headline" data-i18n="hero_title"></h1>
+    <p id="subhead" class="sub" data-i18n="hero_desc"></p>
+    <div class="hero-cta">
+      <a id="ctaTry" class="btn primary" data-i18n="cta_try" href="https://app.xgit.ximory.com/"> </a>
+      <a id="ctaRepo" class="btn ghost" data-i18n="cta_repo" href="https://github.com/ximory-com/xgit"> </a>
     </div>
   </div>
 
-  <div class="hero-art">
-    <img src="./assets/logo.svg" alt="XGit logo big" />
+  <div class="hero-visual">
+    <!-- 用 SVG，透明无底色；PNG 作为兜底 -->
+    <img src="./assets/logo.svg" onerror="this.src='./assets/logo.png'" alt="XGit logo" class="logo">
   </div>
 </section>
     <!-- 功能清单（带状态） -->
