@@ -1,103 +1,254 @@
 <!doctype html>
 <html lang="zh">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>XGit • Website</title>
-  <link rel="icon" href="./assets/logo.png" />
-  <link rel="stylesheet" href="./site.css" />
-  <!-- 你现有的渲染脚本（不要改动它的选择器） -->
-  <script defer src="./site.js"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>XGit • Site</title>
+  <link rel="icon" href="./assets/logo.png">
+  <link rel="stylesheet" href="./site.css">
 </head>
 <body>
-  <!-- 顶部导航 -->
-  <header class="header">
-    <a class="brand" href="./">
-      <img src="./assets/logo.svg" alt="XGit" class="brand-logo" />
-      <span class="brand-text">XGit</span>
+  <!-- Header -->
+  <header class="top">
+    <a class="brand" href="/">
+      <img src="./assets/logo.svg" alt="XGit" class="brand-logo">
+      <span class="brand-name">XGit</span>
     </a>
-
     <nav class="nav">
-      <a id="navRepo" class="nav-link" href="https://github.com/ximory-com/xgit" target="_blank" rel="noopener">GitHub</a>
-      <a class="nav-link" href="https://app.xgit.ximory.com/" target="_blank" rel="noopener">Web App</a>
-
-      <!-- 语言开关：保持原有 id，供 site.js 使用 -->
+      <a href="https://github.com/ximory-com/xgit" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://app.xgit.ximory.com/" target="_self">Web App</a>
       <div class="lang">
-        <button id="langZh" class="lang-btn" type="button">中文</button>
-        <button id="langEn" class="lang-btn" type="button">EN</button>
+        <button id="btnZh" type="button">中文</button>
+        <button id="btnEn" type="button">EN</button>
       </div>
     </nav>
   </header>
 
-  <!-- 英雄区 -->
+  <!-- Hero -->
   <section class="hero">
     <div class="hero-text">
-      <h1 id="headline">随时随地，轻松管理你的 GitHub 仓库</h1>
-      <p id="subhead">
-        XGit 是一款专为移动端设计的轻量级 GitHub 客户端，让你在手机上也能流畅地查看、编辑与提交代码。
+      <h1 class="i18n">
+        <span data-zh>随时随地，轻松管理你的 GitHub 仓库</span>
+        <span data-en>Manage your GitHub repos, anywhere</span>
+      </h1>
+      <p class="sub i18n">
+        <span data-zh>XGit 是一款专为移动端设计的轻量级 GitHub 客户端，让你在手机上也能流畅地查看、编辑与提交代码。</span>
+        <span data-en>XGit is a lightweight GitHub client designed for mobile. Browse, edit and commit on the go.</span>
       </p>
-      <div class="actions">
-        <a id="ctaTry" class="btn primary" href="https://app.xgit.ximory.com/" target="_blank" rel="noopener">立即体验</a>
-        <a id="ctaRepo" class="btn" href="https://github.com/ximory-com/xgit" target="_blank" rel="noopener">GitHub 仓库</a>
+      <div class="cta">
+        <a class="btn primary i18n" href="https://app.xgit.ximory.com/">
+          <span data-zh>立即体验</span>
+          <span data-en>Get Started</span>
+        </a>
+        <a class="btn i18n" href="https://github.com/ximory-com/xgit" target="_blank" rel="noopener">
+          <span data-zh>GitHub 仓库</span>
+          <span data-en>GitHub Repo</span>
+        </a>
       </div>
     </div>
-
-    <!-- 大 LOGO（英雄区） -->
-    <img src="./assets/logo.svg" alt="XGit logo" class="hero-logo" loading="eager" />
-  </section>
-
-  <!-- 基础功能 -->
-  <section class="section">
-    <h2 id="featTitle">基础功能</h2>
-    <div id="featGrid" class="grid">
-      <!-- 由 site.js 渲染；这里留空容器 -->
+    <div class="hero-logo">
+      <img src="./assets/logo.svg" alt="XGit Logo">
     </div>
   </section>
 
-  <!-- 差异对比 -->
+  <!-- Core features -->
   <section class="section">
-    <h2 id="compareTitle">与 GitHub 官方 App/Web 的差异</h2>
-    <div class="table-wrap">
-      <table class="table">
-        <thead>
-          <tr id="cmpHead">
-            <th>功能</th><th>GitHub App/Web</th><th>XGit</th>
-          </tr>
-        </thead>
-        <tbody id="cmpBody">
-          <!-- 由 site.js 渲染 -->
-        </tbody>
-      </table>
+    <h2 class="i18n">
+      <span data-zh>基础功能</span>
+      <span data-en>Core features</span>
+    </h2>
+
+    <div class="cards">
+      <div class="card i18n">
+        <div class="card-title">
+          <span data-zh>仓库列表</span>
+          <span data-en>Repository list</span>
+          <span class="pill i18n">
+            <span data-zh>规划中</span><span data-en>Planned</span>
+          </span>
+        </div>
+        <p>
+          <span data-zh>登录后展示我的仓库，支持搜索与最近活跃排序。</span>
+          <span data-en>Show repos after sign-in, with search and recent-activity sort.</span>
+        </p>
+      </div>
+
+      <div class="card i18n">
+        <div class="card-title">
+          <span data-zh>目录浏览</span>
+          <span data-en>Directory browsing</span>
+          <span class="pill i18n">
+            <span data-zh>规划中</span><span data-en>Planned</span>
+          </span>
+        </div>
+        <p>
+          <span data-zh>逐层进入（移动端单屏），桌面端三栏回退。</span>
+          <span data-en>Stacked single-screen on mobile; 3-pane navigation on desktop.</span>
+        </p>
+      </div>
+
+      <div class="card i18n">
+        <div class="card-title">
+          <span data-zh>文件查看/编辑（文本）</span>
+          <span data-en>View / edit (text)</span>
+          <span class="pill i18n">
+            <span data-zh>规划中</span><span data-en>Planned</span>
+          </span>
+        </div>
+        <p>
+          <span data-zh>基础编辑可用；后续切换 Monaco 编辑器。</span>
+          <span data-en>Basic editor first; switch to Monaco later.</span>
+        </p>
+      </div>
+
+      <div class="card i18n">
+        <div class="card-title">
+          <span data-zh>多文件勾选一次提交</span>
+          <span data-en>Multi-file commit</span>
+          <span class="pill i18n">
+            <span data-zh>规划中</span><span data-en>Planned</span>
+          </span>
+        </div>
+        <p>
+          <span data-zh>同时暂存多个文件，填写一次提交信息。</span>
+          <span data-en>Stage multiple files and commit once.</span>
+        </p>
+      </div>
+
+      <div class="card i18n">
+        <div class="card-title">
+          <span data-zh>Diff 对比</span>
+          <span data-en>Diff</span>
+          <span class="pill i18n">
+            <span data-zh>规划中</span><span data-en>Planned</span>
+          </span>
+        </div>
+        <p>
+          <span data-zh>文件级 Diff，后续支持行内高亮。</span>
+          <span data-en>File-level diff; inline highlights later.</span>
+        </p>
+      </div>
+
+      <div class="card i18n">
+        <div class="card-title">
+          <span data-zh>ZIP 上传/下载</span>
+          <span data-en>ZIP upload / download</span>
+          <span class="pill i18n">
+            <span data-zh>规划中</span><span data-en>Planned</span>
+          </span>
+        </div>
+        <p>
+          <span data-zh>支持打包下载目录，上传 ZIP 并解包入仓。</span>
+          <span data-en>Download folders as ZIP; upload ZIP and unpack into repo.</span>
+        </p>
+      </div>
     </div>
   </section>
 
-  <!-- 路线图 -->
+  <!-- Comparison -->
   <section class="section">
-    <h2 id="roadmapTitle">路线图</h2>
-    <ul id="roadList" class="list">
-      <!-- 由 site.js 渲染 -->
+    <h2 class="i18n">
+      <span data-zh>与 GitHub 官方 App/Web 的差异</span>
+      <span data-en>Differences vs GitHub App/Web</span>
+    </h2>
+
+    <div class="table">
+      <div class="tr th i18n">
+        <div class="td"><span data-zh>功能</span><span data-en>Feature</span></div>
+        <div class="td">GitHub App/Web</div>
+        <div class="td">XGit</div>
+      </div>
+
+      <div class="tr i18n">
+        <div class="td"><span data-zh>仓库浏览</span><span data-en>Repo browsing</span></div>
+        <div class="td i18n"><span data-zh>有</span><span data-en>Available</span></div>
+        <div class="td i18n"><span data-zh>更快、移动优化</span><span data-en>Faster, mobile-optimized</span></div>
+      </div>
+
+      <div class="tr i18n">
+        <div class="td"><span data-zh>文件编辑</span><span data-en>Editing</span></div>
+        <div class="td i18n"><span data-zh>有限</span><span data-en>Limited</span></div>
+        <div class="td i18n"><span data-zh>更好的编辑器（计划）</span><span data-en>Better editor (planned)</span></div>
+      </div>
+
+      <div class="tr i18n">
+        <div class="td"><span data-zh>多文件提交</span><span data-en>Multi-file commit</span></div>
+        <div class="td i18n"><span data-zh>无</span><span data-en>No</span></div>
+        <div class="td i18n"><span data-zh>支持</span><span data-en>Supported</span></div>
+      </div>
+
+      <div class="tr i18n">
+        <div class="td"><span data-zh>ZIP 上传/下载</span><span data-en>ZIP I/O</span></div>
+        <div class="td i18n"><span data-zh>无</span><span data-en>No</span></div>
+        <div class="td i18n"><span data-zh>支持</span><span data-en>Supported</span></div>
+      </div>
+
+      <div class="tr i18n">
+        <div class="td"><span data-zh>移动端体验</span><span data-en>Mobile UX</span></div>
+        <div class="td i18n"><span data-zh>一般</span><span data-en>So-so</span></div>
+        <div class="td i18n"><span data-zh>栈式单屏</span><span data-en>Single-screen stack</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Roadmap -->
+  <section class="section">
+    <h2 class="i18n">
+      <span data-zh>路线图</span>
+      <span data-en>Roadmap</span>
+    </h2>
+    <ul class="list i18n">
+      <li><span data-zh>v0.2：仓库列表、目录浏览</span><span data-en>v0.2: Repo list, directory browsing</span></li>
+      <li><span data-zh>v0.3：基础编辑、提交与历史</span><span data-en>v0.3: Basic edit, commit & history</span></li>
+      <li><span data-zh>v0.4：Diff、多文件提交、ZIP</span><span data-en>v0.4: Diff, multi-file commit, ZIP</span></li>
     </ul>
   </section>
 
   <!-- FAQ -->
   <section class="section">
-    <h2 id="faqTitle">FAQ</h2>
-    <div id="faqList" class="faq">
-      <!-- 由 site.js 渲染 -->
+    <h2>FAQ</h2>
+    <div class="faq">
+      <div class="qa i18n">
+        <div class="q"><span data-zh>需要服务器吗？</span><span data-en>Do I need a server?</span></div>
+        <div class="a"><span data-zh>不需要，全部前端完成，直接对接 GitHub API。</span><span data-en>No. Everything runs in the browser with GitHub API.</span></div>
+      </div>
+      <div class="qa i18n">
+        <div class="q"><span data-zh>支持私有仓库吗？</span><span data-en>Private repos?</span></div>
+        <div class="a"><span data-zh>支持，只需授予 Token（建议 scope: repo）。</span><span data-en>Yes. Grant a token (scope: repo) and you’re good.</span></div>
+      </div>
+      <div class="qa i18n">
+        <div class="q"><span data-zh>移动端体验如何？</span><span data-en>Mobile experience?</span></div>
+        <div class="a"><span data-zh>采用单屏栈式导航，操作更顺手。</span><span data-en>Single-screen stack navigation for smooth operations.</span></div>
+      </div>
     </div>
   </section>
 
-  <!-- 变更摘要 -->
+  <!-- Changelog (excerpt) -->
   <section class="section">
-    <h2 id="changeTitle">最近更新</h2>
-    <div id="changeList" class="changelog">
-      <!-- 由 site.js 渲染 -->
+    <h2 class="i18n">
+      <span data-zh>最近更新</span>
+      <span data-en>Latest updates</span>
+    </h2>
+    <div class="updates">
+      <div class="item">
+        <div class="date">2025-01-XX</div>
+        <div class="ttl i18n">
+          <span data-zh>站点双语与链接修复</span>
+          <span data-en>Site bilingual + link fixes</span>
+        </div>
+        <div class="dsc i18n">
+          <span data-zh>统一中英文文本结构，修复「立即体验」与 GitHub 链接；英雄区布局优化。</span>
+          <span data-en>Unified CN/EN copy, fixed CTAs, refined hero layout.</span>
+        </div>
+      </div>
     </div>
   </section>
 
-  <!-- 页脚 -->
-  <footer class="footer">
-    <div id="footText">© 2025 Ximory · XGit v0.1.0</div>
+  <footer class="foot">
+    <div>© 2025 Ximory · XGit v0.1.0</div>
+    <a href="https://xgit.ximory.com/">xgit.ximory.com</a>
   </footer>
+
+  <script src="./site.js"></script>
 </body>
 </html>
