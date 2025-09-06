@@ -65,4 +65,26 @@ XGit = 简洁、移动优先、丝滑体验的 GitHub Web/App 客户端。
 
 ---
 
+## 亮点需求 / Highlight Features
+
+### 内置 Git 命令面板（简化版 Git CLI）
+- **定位**：不是运行真实 git shell，而是通过 GitHub API + 前端缓存模拟常用命令。
+- **初期支持命令**：
+  - `status`：查看本地修改状态
+  - `diff [path]`：显示差异
+  - `commit -m "msg"`：提交改动
+  - `log -n 20`：查看最近提交
+  - `branch` / `checkout <branch>`：分支操作
+- **交互**：
+  - 输入框输入命令，上下键浏览历史
+  - 输出区带颜色提示（成功绿，警告黄，错误红）
+  - 历史记录存储在 localStorage
+- **价值**：
+  - 提升专业感和实用性
+  - 成为 XGit 与 GitHub 官方 App / Web 的差异化亮点
+- **后续扩展**：
+  - `revert <sha>`、`tag` 管理
+  - push/pull/fetch（轻量化）
+  - AI 辅助生成 commit message
+
 ✍️ 更新日志请见 [changelog.md](./changelog.md)  
