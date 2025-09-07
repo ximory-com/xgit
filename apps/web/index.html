@@ -4,113 +4,82 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>XGit • Web</title>
-  <link rel="icon" href="./assets/logo.png">
   <link rel="stylesheet" href="./web.css">
 </head>
 <body>
-  <!-- 顶部栏 -->
   <header class="top">
-    <a class="brand" href="https://xgit.ximory.com/" target="_self" rel="noopener">
-      <img class="brand-logo" src="./assets/logo.svg" alt="XGit">
-      <span class="brand-name">XGit</span>
-    </a>
-
+    <a class="brand" href="#"><span class="brand-name">XGit <em>Web</em></span></a>
     <nav class="nav">
-      <div class="user">
-        <img id="userAvatar" class="avatar" alt="">
-        <span id="userName">-</span>
-      </div>
-
-      <div class="actions">
-        <button id="btnRefresh" class="btn">Refresh</button>
-        <button id="btnSign" class="btn primary" data-mode="in">Sign in</button>
-      </div>
-
+      <a id="btnBack" class="btn ghost" href="https://xgit.ximory.com/" target="_self" data-i18n="backToSite">返回官网</a>
       <div class="lang">
-        <button id="langZh" class="btn">中文</</button>
-        <button id="langEn" class="btn">EN</button>
+        <button id="langZh" type="button">中文</button>
+        <button id="langEn" type="button">EN</button>
       </div>
     </nav>
   </header>
 
-  <main>
-    <!-- 欢迎卡片 -->
-    <section class="card welcome">
-      <div class="welcome-left">
+  <main class="wrap">
+    <!-- Welcome / Auth -->
+    <section class="card hero">
+      <div class="hero-body">
         <h1 data-i18n="welcomeTitle">欢迎使用 XGit Web</h1>
-        <p class="sub" data-i18n="welcomeSub">随时随地，轻松管理你的 GitHub 仓库。</p>
-        <div class="btns">
-          <button id="btnSign2" class="btn primary">Sign in</button>
-          <a class="btn" href="https://xgit.ximory.com/" target="_self" data-i18n="backToSite">返回官网</a>
+        <p class="sub" data-i18n="welcomeSub">随时随地， 轻松管理你的 GitHub 仓库。</p>
+        <div class="cta">
+          <button id="btnSign2" class="btn primary" data-i18n="signIn">用 Token 登录</button>
+          <a class="btn" href="https://xgit.ximory.com/" data-i18n="backToSite" target="_self">返回官网</a>
         </div>
-      </div>
-      <div class="welcome-right">
-        <img src="./assets/logo.svg" alt="XGit">
+
+        <div id="userBox" class="user hidden">
+          <img id="userAvatar" class="avatar" alt="avatar">
+          <div class="info">
+            <div id="userName" class="name">-</div>
+            <div class="stat" data-i18n="signedIn">已登录</div>
+          </div>
+          <div class="ops">
+            <button id="btnRefresh" class="chip" data-i18n="refresh">刷新</button>
+            <button id="btnSignOut" class="chip warn" data-i18n="signOut">退出登录</button>
+          </div>
+        </div>
       </div>
     </section>
 
-    <!-- 仓库列表卡片 -->
+    <!-- Repo list + details -->
     <section class="card">
-      <div class="card-head">
+      <div class="card-title">
         <h2 data-i18n="repos">仓库</h2>
-        <div class="head-actions">
-          <button id="repoReload" class="btn">Reload</button>
-          <button id="btnSignOut" class="btn">Sign out</button>
-        </div>
+        <button id="repoReload" class="chip icon" title="reload">⟳</button>
       </div>
 
-      <!-- 未登录提示 -->
       <div id="repoEmpty" class="empty" data-i18n="pleaseSignIn">请先登录</div>
-
-      <!-- 已登录用户信息（小条） -->
-      <div id="userBox" class="userbox hidden">
-        <img id="userAvatarMini" class="avatar" alt="">
-        <span id="userNameMini">-</span>
-        <span class="chip signed" data-i18n="signedIn">已登录</span>
-      </div>
-
-      <!-- 仓库列表 -->
       <ul id="repoList" class="repo-list hidden"></ul>
-    </section>
 
-    <!-- 仓库详情视图 -->
-    <section id="repoPage" class="card hidden">
-      <div class="repo-head">
-        <nav class="breadcrumbs">
-          <button id="repoBack" class="link">&larr; <span data-i18n="backToList">返回列表</span></button>
-          <span class="sep">/</span>
-          <span id="repoCrumbOwner"></span>
-          <span class="sep">/</span>
-          <strong id="repoCrumbName"></strong>
-        </nav>
-
-        <div class="repo-title-row">
-          <h2 id="repoTitle">owner/name</h2>
-          <div class="repo-meta">
-            <span id="repoBranch" class="tag">branch: main</span>
-            <span id="repoUpdated" class="tag">updated: -</span>
-            <span id="repoLang" class="tag">-</span>
-            <span id="repoStars" class="tag">★ 0</span>
-            <span id="repoForks" class="tag">⑂ 0</span>
-            <span id="repoIssues" class="tag">● 0</span>
-          </div>
-          <div class="repo-actions">
-            <a id="repoZip" class="btn" href="#" target="_blank" rel="noreferrer" data-i18n="downloadZip">下载 ZIP</a>
-            <a id="repoOnGitHub" class="btn" href="#" target="_blank" rel="noreferrer">GitHub</a>
-          </div>
+      <div id="repoView" class="repo-view hidden">
+        <a id="repoBack" class="back">&larr; <span data-i18n="backToList">返回列表</span></a>
+        <h3 id="repoFullName">-</h3>
+        <p id="repoDesc" class="desc"></p>
+        <div class="meta-line">
+          <span id="repoLang" class="tag"></span>
+          <span id="repoBranch" class="tag"></span>
+          <span id="repoUpdated" class="tag"></span>
         </div>
-      </div>
-
-      <div class="repo-body">
-        <h3 data-i18n="readme">README（节选）</h3>
-        <pre id="repoReadme" class="readme-snippet">-</pre>
+        <div class="meta-line">
+          <span id="repoStars" class="tag">★ 0</span>
+          <span id="repoForks" class="tag">⑂ 0</span>
+          <span id="repoIssues" class="tag">⚑ 0</span>
+        </div>
+        <div class="actions">
+          <a id="repoZip" class="btn" target="_blank" rel="noreferrer">下载 ZIP</a>
+          <a id="repoGithub" class="btn" target="_blank" rel="noreferrer">GitHub</a>
+        </div>
+        <h4>README</h4>
+        <div id="repoReadme" class="readme md"></div>
       </div>
     </section>
   </main>
 
   <footer class="foot">
     <div>© 2025 Ximory · XGit</div>
-    <a class="link" href="https://xgit.ximory.com/" target="_self">xgit.ximory.com</a>
+    <a href="https://xgit.ximory.com/">xgit.ximory.com</a>
   </footer>
 
   <script src="./web.js"></script>

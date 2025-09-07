@@ -1,262 +1,135 @@
-// ========== utils ==========
-const $  = (s, el=document) => el.querySelector(s);
-const $$ = (s, el=document) => Array.from(el.querySelectorAll(s));
-const esc = (s) => String(s ?? '').replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+/* ---------- utils ---------- */
+const $ = (s, el=document)=> el.querySelector(s);
+const $$ = (s, el=document)=> Array.from(el.querySelectorAll(s));
+const esc = s => String(s??'').replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
-// ========== i18n (fallback zh) ==========
-let lang = (localStorage.getItem('xgit_lang') || '').trim();
-if (!lang) {
-  const nav = (navigator.language || 'zh').toLowerCase();
-  lang = nav.startsWith('zh') ? 'zh' : 'en';
-  localStorage.setItem('xgit_lang', lang);
-}
+/* ---------- i18n (fallback zh) ---------- */
+let lang = (localStorage.getItem('xgit_lang') || ((navigator.language||'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en'));
 const dict = {
-  zh:{ signIn:'用 Token 登录', signOut:'退出登录', refresh:'刷新', backToSite:'返回官网',
-       welcomeTitle:'欢迎使用 XGit Web', welcomeSub:'随时随地，轻松管理你的 GitHub 仓库。',
-       signedIn:'已登录', repos:'仓库', pleaseSignIn:'请先登录', backToList:'返回列表',
-       downloadZip:'下载 ZIP', readme:'README（节选）' },
-  en:{ signIn:'Sign in with Token', signOut:'Sign out', refresh:'Refresh', backToSite:'Back to Site',
-       welcomeTitle:'Welcome to XGit Web', welcomeSub:'Manage your GitHub repos on the go.',
-       signedIn:'Signed in', repos:'Repositories', pleaseSignIn:'Please sign in first', backToList:'Back to list',
-       downloadZip:'Download ZIP', readme:'README (snippet)' }
+  zh:{signIn:'用 Token 登录',signOut:'退出登录',refresh:'刷新',backToSite:'返回官网',welcomeTitle:'欢迎使用 XGit Web',welcomeSub:'随时随地，轻松管理你的 GitHub 仓库。',signedIn:'已登录',repos:'仓库',backToList:'返回列表',pleaseSignIn:'请先登录',noRepos:'没有可显示的仓库'},
+  en:{signIn:'Sign in with Token',signOut:'Sign out',refresh:'Refresh',backToSite:'Back to Site',welcomeTitle:'Welcome to XGit Web',welcomeSub:'Manage your GitHub repos on the go.',signedIn:'Signed in',repos:'Repositories',backToList:'Back to list',pleaseSignIn:'Please sign in',noRepos:'No repositories to show'}
 };
-function t(key){ return (dict[lang] && dict[lang][key]) ?? (dict.zh[key] ?? key); }
+function t(k){ return (dict[lang]&&dict[lang][k]) ?? (dict.zh[k]??k); }
 function applyI18n(){
   $$('[data-i18n]').forEach(el=> el.textContent = t(el.getAttribute('data-i18n')));
-  document.documentElement.lang = lang === 'zh' ? 'zh' : 'en';
+  document.documentElement.lang = lang==='zh'?'zh':'en';
 }
 
-// ========== auth/API ==========
-const LS_TOKEN = 'xgit_token';
+/* ---------- auth/API ---------- */
+const LS_TOKEN='xgit_token';
 const GH = 'https://api.github.com';
 
-function ghHeaders(token, extra={}){
-  return { 'Accept':'application/vnd.github+json', 'Authorization': `Bearer ${token}`, ...extra };
+async function fetchJson(url, token){
+  const base={'Accept':'application/vnd.github+json'};
+  const tries = token ? [
+    {...base, Authorization:`Bearer ${token}`},
+    {...base, Authorization:`token ${token}`},
+  ] : [base];
+  let last;
+  for(const headers of tries){
+    try{
+      const r = await fetch(url,{headers});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      return await r.json();
+    }catch(e){ last=e; }
+  }
+  throw last||new Error('request failed');
 }
-async function fetchJSON(url, token){
-  const r = await fetch(url, { headers: token ? ghHeaders(token) : {'Accept':'application/vnd.github+json'} });
-  if (!r.ok) throw new Error('HTTP '+r.status);
-  return await r.json();
-}
+
 async function apiMe(){
   const tk = localStorage.getItem(LS_TOKEN); if(!tk) throw new Error('no token');
-  return fetchJSON(`${GH}/user`, tk);
+  return fetchJson(`${GH}/user`, tk);
 }
-async function apiRepos({ page=1, per_page=100 }={}){
+async function apiRepos({page=1,per_page=100}={}){
   const tk = localStorage.getItem(LS_TOKEN); if(!tk) throw new Error('no token');
-  const qs = new URLSearchParams({
-    per_page:String(per_page), page:String(page), sort:'updated',
-    affiliation:'owner,collaborator,organization_member', visibility:'all'
-  }).toString();
-  return fetchJSON(`${GH}/user/repos?${qs}`, tk);
-}
-async function apiRepo(owner, repo){
-  const tk = localStorage.getItem(LS_TOKEN); if(!tk) throw new Error('no token');
-  return fetchJSON(`${GH}/repos/${owner}/${repo}`, tk);
+  const qs = new URLSearchParams({per_page:String(per_page),page:String(page),sort:'updated',affiliation:'owner,collaborator,organization_member',visibility:'all'}).toString();
+  return fetchJson(`${GH}/user/repos?${qs}`, tk);
 }
 async function apiReadme(owner, repo, ref){
   const tk = localStorage.getItem(LS_TOKEN); if(!tk) throw new Error('no token');
-  const r = await fetch(`${GH}/repos/${owner}/${repo}/readme${ref?`?ref=${encodeURIComponent(ref)}`:''}`, { headers: ghHeaders(tk) });
-  if (!r.ok) return null;
-  const j = await r.json();
-  if (!j || !j.content) return null;
-  try {
-    const txt = decodeURIComponent(escape(atob(j.content)));
-    return txt;
-  } catch { return null; }
+  const data = await fetchJson(`${GH}/repos/${owner}/${repo}/readme${ref?`?ref=${encodeURIComponent(ref)}`:''}`, tk);
+  if(!data || !data.content) return null;
+  const txt = atob(data.content.replace(/\n/g,''));
+  return txt;
 }
 
-// ========== UI 状态 ==========
-function setSignedUI(me){
-  const signed = !!me;
-  $('#btnSign').textContent  = signed ? t('signOut') : t('signIn');
-  $('#btnSign2').textContent = signed ? t('signOut') : t('signIn');
-  $('#btnSign').dataset.mode = signed ? 'out' : 'in';
-  $('#btnSign2').dataset.mode = signed ? 'out' : 'in';
+/* ---------- Markdown (tiny) ---------- */
+function mdEscape(s){ return String(s).replace(/[&<>]/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;' }[m])); }
+function mdToHtml(md){
+  if(!md) return '';
+  // normalize line endings
+  md = md.replace(/\r\n?/g,'\n');
 
-  if (signed){
-    $('#userAvatar')?.setAttribute('src', `${me.avatar_url}&s=40`);
-    $('#userAvatarMini')?.setAttribute('src', `${me.avatar_url}&s=28`);
-    $('#userName').textContent = me.login;
-    $('#userNameMini').textContent = me.login;
+  // fenced code blocks ```lang\n...\n```
+  md = md.replace(/```([\s\S]*?)```/g, (m, code)=> `<pre><code>${mdEscape(code.trim())}</code></pre>`);
+
+  // headings
+  md = md.replace(/^(#{1,3})[ \t]+(.+)$/gm, (m, hashes, text)=> {
+    const h = hashes.length;
+    return `<h${h}>${mdEscape(text.trim())}</h${h}>`;
+  });
+
+  // lists (very naive)
+  md = md.replace(/^(?:-|\*) (.+)$/gm, (m, item)=> `<ul><li>${mdInline(item.trim())}</li></ul>`);
+  md = md.replace(/^\d+\. (.+)$/gm, (m, item)=> `<ol><li>${mdInline(item.trim())}</li></ol>`);
+
+  // paragraphs: split by blank lines, wrap if not already HTML block
+  const blocks = md.split(/\n{2,}/).map(b=>{
+    if (/^<(h\d|ul|ol|pre|blockquote)/.test(b.trim())) return b;
+    return `<p>${mdInline(b.trim())}</p>`;
+  });
+  return blocks.join('\n');
+}
+function mdInline(s){
+  if(!s) return '';
+  // inline code
+  s = s.replace(/`([^`]+)`/g, (m, c)=> `<code>${mdEscape(c)}</code>`);
+  // bold **text**
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  // italics *text*
+  s = s.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  // links [text](url)
+  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (m, text, url)=> `<a href="${url}" target="_blank" rel="noreferrer">${mdEscape(text)}</a>`);
+  return s;
+}
+
+/* ---------- UI State ---------- */
+function setSignedUI(me){
+  if(me){
     $('#userBox').classList.remove('hidden');
     $('#repoEmpty').classList.add('hidden');
+    $('#userName').textContent = `${me.login}`;
+    $('#userAvatar').src = `${me.avatar_url}&s=80`;
+    $('#btnSign2').textContent = t('signOut');
+    $('#btnSign2').dataset.mode = 'out';
   }else{
-    $('#userAvatar')?.removeAttribute('src');
-    $('#userAvatarMini')?.removeAttribute('src');
-    $('#userName').textContent = '-';
-    $('#userNameMini').textContent = '-';
     $('#userBox').classList.add('hidden');
     $('#repoEmpty').classList.remove('hidden');
+    $('#btnSign2').textContent = t('signIn');
+    delete $('#btnSign2').dataset.mode;
+    $('#userAvatar').removeAttribute('src');
+    $('#userName').textContent = '-';
     $('#repoList').classList.add('hidden');
     $('#repoList').innerHTML = '';
-    // 回到列表视图
-    showListView();
+    $('#repoView').classList.add('hidden');
   }
 }
+
+/* ---------- Auth flows ---------- */
 async function validateToken(){
-  const tk = localStorage.getItem(LS_TOKEN); if(!tk) return null;
+  const tk = localStorage.getItem(LS_TOKEN);
+  if(!tk) return null;
   try{ return await apiMe(); }catch{ return null; }
 }
-
-// ========== 仓库列表渲染 ==========
-async function loadRepos(){
-  const token = localStorage.getItem(LS_TOKEN);
-  if(!token){ return; }
-  let repos = [];
-  try{
-    repos = await apiRepos({ per_page: 50, page: 1 });
-  }catch(e){
-    console.warn(e);
-    $('#repoList').classList.remove('hidden');
-    $('#repoList').innerHTML = `<li class="empty">${esc(lang==='zh'?'加载仓库失败':'Failed to load repositories')}</li>`;
-    return;
-  }
-  $('#repoList').classList.remove('hidden');
-  if(!repos || repos.length===0){
-    $('#repoList').innerHTML = `<li class="empty">${esc(t('noRepos')|| (lang==='zh'?'没有可显示的仓库':'No repositories'))}</li>`;
-    return;
-  }
-
-  const html = repos.map(r=>{
-    const privacy = r.private ? '🔒' : '🌐';
-    const full = `${r.owner?.login || ''}/${r.name}`;
-    const br = r.default_branch || 'main';
-    const updated = r.pushed_at ? new Date(r.pushed_at).toLocaleString() : '';
-    const langTag = r.language ? `<span class="tag">${esc(r.language)}</span>` : '';
-    const stars = r.stargazers_count ?? 0;
-    const forks = r.forks_count ?? 0;
-    const issues = r.open_issues_count ?? 0;
-    const desc = r.description ? `<div class="desc">${esc(r.description)}</div>` : '';
-
-    return `<li class="repo" data-owner="${esc(r.owner.login)}" data-repo="${esc(r.name)}" data-branch="${esc(br)}" data-url="${esc(r.html_url)}">
-      <div class="row">
-        <div class="left">
-          <div class="name">${privacy} ${esc(full)}</div>
-          ${desc}
-          <div class="meta">
-            ${langTag}
-            <span class="tag">branch: ${esc(br)}</span>
-            <span class="tag">updated: ${esc(updated)}</span>
-            <span class="tag">★ ${stars}</span>
-            <span class="tag">⑂ ${forks}</span>
-            <span class="tag">● ${issues}</span>
-          </div>
-        </div>
-        <div class="right">
-          <a class="chip open" href="${esc(r.html_url)}" target="_blank" rel="noreferrer">GitHub</a>
-          <div class="more">
-            <button class="more-btn">…</button>
-            <div class="more-menu">
-              <div class="item" data-act="open">Open on GitHub</div>
-              <div class="item" data-act="clone">Copy clone URL (SSH)</div>
-              <div class="item" data-act="name">Copy owner/name</div>
-              <div class="item" data-act="zip">Download ZIP</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </li>`;
-  }).join('');
-  $('#repoList').innerHTML = html;
-
-  // 绑定点击进入仓库
-  $$('#repoList .repo').forEach(li=>{
-    li.addEventListener('click', (e)=>{
-      // 如果点的是更多菜单或链接，不进入仓库页
-      if (e.target.closest('.more') || e.target.closest('a')) return;
-      openRepoPage(li.dataset.owner, li.dataset.repo, li.dataset.branch, li.dataset.url);
-    });
-    // 更多菜单
-    const more = li.querySelector('.more');
-    const btn  = li.querySelector('.more-btn');
-    const menu = li.querySelector('.more-menu');
-    btn?.addEventListener('click', (e)=>{
-      e.stopPropagation();
-      more.classList.toggle('open');
-    });
-    menu?.addEventListener('click', (e)=>{
-      e.stopPropagation();
-      const act = e.target.closest('.item')?.dataset.act;
-      if (!act) return;
-      const owner = li.dataset.owner, repo = li.dataset.repo, br = li.dataset.branch;
-      const url = li.dataset.url;
-      switch(act){
-        case 'open':
-          window.open(url, '_blank'); break;
-        case 'clone': {
-          const ssh = `git@github.com:${owner}/${repo}.git`;
-          navigator.clipboard?.writeText(ssh);
-          alert((lang==='zh'?'已复制：':'Copied: ')+ssh);
-          break;
-        }
-        case 'name': {
-          const name = `${owner}/${repo}`;
-          navigator.clipboard?.writeText(name);
-          alert((lang==='zh'?'已复制：':'Copied: ')+name);
-          break;
-        }
-        case 'zip': {
-          const zip = `https://github.com/${owner}/${repo}/archive/refs/heads/${encodeURIComponent(br)}.zip`;
-          window.open(zip, '_blank');
-          break;
-        }
-      }
-      more.classList.remove('open');
-    });
-    document.addEventListener('click', ()=> more.classList.remove('open'));
-  });
-}
-
-// ========== 仓库详情页 ==========
-function showRepoView(){ $('#repoPage').classList.remove('hidden'); }
-function showListView(){ $('#repoPage').classList.add('hidden'); }
-$('#repoBack')?.addEventListener('click', ()=> showListView());
-
-async function openRepoPage(owner, repo, br, htmlUrl){
-  showRepoView();
-  $('#repoCrumbOwner').textContent = owner;
-  $('#repoCrumbName').textContent = repo;
-  $('#repoTitle').textContent = `${owner}/${repo}`;
-  $('#repoBranch').textContent = `branch: ${br}`;
-  $('#repoOnGitHub').setAttribute('href', htmlUrl);
-  $('#repoZip').setAttribute('href', `https://github.com/${owner}/${repo}/archive/refs/heads/${encodeURIComponent(br)}.zip`);
-  $('#repoReadme').textContent = '…';
-
-  try{
-    const r = await apiRepo(owner, repo);
-    const updated = r.pushed_at ? new Date(r.pushed_at).toLocaleString() : '-';
-    $('#repoUpdated').textContent = `updated: ${updated}`;
-    $('#repoLang').textContent = r.language || '-';
-    $('#repoStars').textContent = `★ ${r.stargazers_count ?? 0}`;
-    $('#repoForks').textContent = `⑂ ${r.forks_count ?? 0}`;
-    $('#repoIssues').textContent = `● ${r.open_issues_count ?? 0}`;
-  }catch(e){
-    console.warn(e);
-  }
-
-  try{
-    const txt = await apiReadme(owner, repo, br);
-    if (txt){
-      const cut = txt.slice(0, 1200); // 片段
-      $('#repoReadme').textContent = cut;
-    }else{
-      $('#repoReadme').textContent = lang==='zh'?'未找到 README':'README not found';
-    }
-  }catch{
-    $('#repoReadme').textContent = lang==='zh'?'读取 README 失败':'Failed to load README';
-  }
-}
-
-// ========== 登录流 ==========
 async function signInFlow(){
-  const token = prompt(lang==='zh'?'输入 GitHub Token（建议 fine-grained / repo read）':'Paste your GitHub Token');
+  const token = prompt('GitHub Personal Access Token（建议仅勾选 repo / 或 Fine-grained Read）:');
   if(!token) return;
   localStorage.setItem(LS_TOKEN, token.trim());
   const me = await validateToken();
-  if (me){
+  if(me){
     setSignedUI(me);
     await loadRepos();
+    alert(lang==='zh'?'登录成功':'Signed in');
   }else{
     localStorage.removeItem(LS_TOKEN);
     alert(lang==='zh'?'Token 无效':'Invalid token');
@@ -269,26 +142,110 @@ async function signOutFlow(){
 async function refreshFlow(){
   const me = await validateToken();
   setSignedUI(me);
-  if (me) await loadRepos();
+  if(me) await loadRepos();
 }
 
-// ========== 绑定 & 启动 ==========
-function bind(){
-  // 登录/退出（顶部与欢迎卡片按钮共享逻辑）
-  ['btnSign','btnSign2'].forEach(id=>{
-    const el = $('#'+id);
-    el && el.addEventListener('click', async (e)=>{
-      if (el.dataset.mode === 'out') await signOutFlow();
-      else await signInFlow();
-    });
-  });
-  $('#btnSignOut')?.addEventListener('click', signOutFlow);
-  $('#btnRefresh')?.addEventListener('click', refreshFlow);
-  $('#repoReload')?.addEventListener('click', loadRepos);
+/* ---------- Repo list & details ---------- */
+let lastReposCache = []; // cache for details
+async function loadRepos(){
+  const tk = localStorage.getItem(LS_TOKEN); if(!tk){ return; }
+  let repos = [];
+  try{
+    repos = await apiRepos({per_page:100,page:1});
+    lastReposCache = repos;
+  }catch(e){
+    console.warn(e);
+    $('#repoList').classList.remove('hidden');
+    $('#repoList').innerHTML = `<li>${esc(lang==='zh'?'加载仓库失败':'Failed to load repositories')}</li>`;
+    return;
+  }
+  $('#repoList').classList.remove('hidden');
+  if(!repos || repos.length===0){
+    $('#repoList').innerHTML = `<li>${esc(t('noRepos'))}</li>`;
+    return;
+  }
+  const html = repos.map(r=>{
+    const privacy = r.private ? '🔒' : '🌐';
+    const full = `${r.owner?.login || ''}/${r.name}`;
+    const langTag = r.language ? `<span class="tag">${esc(r.language)}</span>` : '';
+    const br = r.default_branch || 'main';
+    const updated = r.pushed_at ? new Date(r.pushed_at).toLocaleString() : '';
+    const desc = r.description ? `<div class="meta">${esc(r.description)}</div>` : '';
+    return `<li class="repo" data-owner="${esc(r.owner.login)}" data-repo="${esc(r.name)}" data-branch="${esc(br)}">
+      <div class="row">
+        <div class="left">
+          <div class="name">${privacy} ${esc(full)}</div>
+          ${desc}
+          <div class="meta">
+            ${langTag}
+            <span class="tag">branch: ${esc(br)}</span>
+            <span class="tag">updated: ${esc(updated)}</span>
+          </div>
+        </div>
+        <div class="right">
+          <a class="chip" href="${esc(r.html_url)}" target="_blank" rel="noreferrer">GitHub</a>
+        </div>
+      </div>
+    </li>`;
+  }).join('');
+  $('#repoList').innerHTML = html;
 
-  // 语言
-  $('#langZh')?.addEventListener('click', ()=>{ lang='zh'; localStorage.setItem('xgit_lang',lang); applyI18n(); });
-  $('#langEn')?.addEventListener('click', ()=>{ lang='en'; localStorage.setItem('xgit_lang',lang); applyI18n(); });
+  // bind click -> open repo
+  $$('#repoList .repo').forEach(li=>{
+    li.onclick = () => openRepo(li.dataset.owner, li.dataset.repo, li.dataset.branch);
+  });
+}
+
+async function openRepo(owner, repo, branch){
+  // find cached item
+  const r = (lastReposCache||[]).find(x=> x.owner?.login===owner && x.name===repo) || {};
+  $('#repoFullName').textContent = `${owner}/${repo}`;
+  $('#repoDesc').textContent = r.description || '';
+  $('#repoLang').textContent = r.language || '';
+  $('#repoBranch').textContent = `branch: ${branch}`;
+  $('#repoUpdated').textContent = r.pushed_at ? new Date(r.pushed_at).toLocaleString() : '';
+  $('#repoStars').textContent = `★ ${r.stargazers_count ?? 0}`;
+  $('#repoForks').textContent = `⑂ ${r.forks_count ?? 0}`;
+  $('#repoIssues').textContent = `⚑ ${r.open_issues ?? 0}`;
+  $('#repoGithub').href = r.html_url || `https://github.com/${owner}/${repo}`;
+  $('#repoZip').href = `https://github.com/${owner}/${repo}/archive/refs/heads/${encodeURIComponent(branch)}.zip`;
+
+  // fetch README
+  $('#repoReadme').innerHTML = '<em>Loading README…</em>';
+  try{
+    const txt = await apiReadme(owner, repo, branch);
+    const html = mdToHtml(txt);
+    $('#repoReadme').innerHTML = html || '<em>No README</em>';
+  }catch(e){
+    console.warn(e);
+    $('#repoReadme').innerHTML = '<em>Failed to load README</em>';
+  }
+
+  // show detail, ensure in view
+  $('#repoView').classList.remove('hidden');
+  $('#repoView').scrollIntoView({behavior:'smooth', block:'start'});
+
+  // back to list
+  $('#repoBack').onclick = ()=>{
+    $('#repoView').classList.add('hidden');
+    document.body.scrollIntoView({behavior:'smooth', block:'start'});
+  };
+}
+
+/* ---------- bind & boot ---------- */
+function bind(){
+  // sign button in hero
+  $('#btnSign2').onclick = async (e)=>{
+    if(e.currentTarget.dataset.mode === 'out'){ await signOutFlow(); }
+    else { await signInFlow(); }
+  };
+  $('#btnSignOut').onclick = signOutFlow;
+  $('#btnRefresh').onclick = refreshFlow;
+  $('#repoReload').onclick = loadRepos;
+
+  // language
+  $('#langZh').onclick = ()=>{ lang='zh'; localStorage.setItem('xgit_lang',lang); applyI18n(); };
+  $('#langEn').onclick = ()=>{ lang='en'; localStorage.setItem('xgit_lang',lang); applyI18n(); };
 }
 
 async function boot(){
@@ -296,7 +253,6 @@ async function boot(){
   bind();
   const me = await validateToken();
   setSignedUI(me);
-  if (me) await loadRepos();
+  if(me) await loadRepos();
 }
-
-document.addEventListener('DOMContentLoaded', boot);
+boot();
