@@ -4,82 +4,82 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>XGit • Web</title>
+  <link rel="icon" href="../../assets/logo.png">
   <link rel="stylesheet" href="./web.css">
 </head>
 <body>
-  <header class="top">
-    <a class="brand" href="#"><span class="brand-name">XGit <em>Web</em></span></a>
-    <nav class="nav">
-      <a id="btnBack" class="btn ghost" href="https://xgit.ximory.com/" target="_self" data-i18n="backToSite">返回官网</a>
+  <header class="topbar">
+    <div class="brand">
+      <a class="brand-link" href="https://xgit.ximory.com/" target="_self">
+        <img class="brand-logo" src="../../assets/logo.svg" alt="XGit">
+        <span class="brand-name">XGit</span>
+      </a>
+    </div>
+    <nav class="actions">
       <div class="lang">
         <button id="langZh" type="button">中文</button>
         <button id="langEn" type="button">EN</button>
       </div>
+      <button id="btnBack" class="btn ghost" data-i18n="backToSite">返回官网</button>
+      <button id="btnSign" class="btn" data-i18n="signIn">用 Token 登录</button>
+      <button id="btnRefresh" class="btn ghost" data-i18n="refresh">刷新</button>
     </nav>
   </header>
 
-  <main class="wrap">
-    <!-- Welcome / Auth -->
-    <section class="card hero">
-      <div class="hero-body">
-        <h1 data-i18n="welcomeTitle">欢迎使用 XGit Web</h1>
-        <p class="sub" data-i18n="welcomeSub">随时随地， 轻松管理你的 GitHub 仓库。</p>
-        <div class="cta">
-          <button id="btnSign2" class="btn primary" data-i18n="signIn">用 Token 登录</button>
-          <a class="btn" href="https://xgit.ximory.com/" data-i18n="backToSite" target="_self">返回官网</a>
+  <main class="main">
+    <!-- Welcome card -->
+    <section class="card welcome" id="welcome">
+      <h1 data-i18n="welcomeTitle">欢迎使用 XGit Web</h1>
+      <p class="sub" data-i18n="welcomeSub">随时随地，轻松管理你的 GitHub 仓库。</p>
+      <div class="user" id="userBox" hidden>
+        <img id="userAvatar" class="avatar" alt="avatar">
+        <div class="user-meta">
+          <div id="userName" class="name">-</div>
+          <div class="muted" data-i18n="signedIn">已登录</div>
         </div>
-
-        <div id="userBox" class="user hidden">
-          <img id="userAvatar" class="avatar" alt="avatar">
-          <div class="info">
-            <div id="userName" class="name">-</div>
-            <div class="stat" data-i18n="signedIn">已登录</div>
-          </div>
-          <div class="ops">
-            <button id="btnRefresh" class="chip" data-i18n="refresh">刷新</button>
-            <button id="btnSignOut" class="chip warn" data-i18n="signOut">退出登录</button>
-          </div>
+        <div class="user-actions">
+          <button id="btnSignOut" class="btn danger" data-i18n="signOut">退出登录</button>
         </div>
       </div>
+      <div id="notSigned" class="muted" data-i18n="pleaseSignIn">请先登录</div>
     </section>
 
-    <!-- Repo list + details -->
-    <section class="card">
-      <div class="card-title">
+    <!-- Repo list -->
+    <section class="card repos">
+      <div class="row head">
         <h2 data-i18n="repos">仓库</h2>
-        <button id="repoReload" class="chip icon" title="reload">⟳</button>
+        <div class="row-actions">
+          <button id="repoReload" class="btn ghost" data-i18n="refresh">刷新</button>
+        </div>
       </div>
+      <ul id="repoList" class="repo-list"></ul>
+    </section>
 
-      <div id="repoEmpty" class="empty" data-i18n="pleaseSignIn">请先登录</div>
-      <ul id="repoList" class="repo-list hidden"></ul>
-
-      <div id="repoView" class="repo-view hidden">
-        <a id="repoBack" class="back">&larr; <span data-i18n="backToList">返回列表</span></a>
-        <h3 id="repoFullName">-</h3>
-        <p id="repoDesc" class="desc"></p>
-        <div class="meta-line">
-          <span id="repoLang" class="tag"></span>
-          <span id="repoBranch" class="tag"></span>
-          <span id="repoUpdated" class="tag"></span>
+    <!-- Repo detail (sticky card shown after click) -->
+    <section id="repoDetail" class="card repo-detail" hidden>
+      <div class="row head">
+        <div class="title">
+          <div id="repoFullName" class="repo-fullname">owner/name</div>
+          <div class="tags">
+            <span id="repoBranch" class="tag">main</span>
+            <span id="repoLang" class="tag">-</span>
+          </div>
         </div>
-        <div class="meta-line">
-          <span id="repoStars" class="tag">★ 0</span>
-          <span id="repoForks" class="tag">⑂ 0</span>
-          <span id="repoIssues" class="tag">⚑ 0</span>
+        <div class="row-actions">
+          <button id="btnOpenGH" class="btn ghost">GitHub</button>
+          <button id="btnZip" class="btn">ZIP</button>
         </div>
-        <div class="actions">
-          <a id="repoZip" class="btn" target="_blank" rel="noreferrer">下载 ZIP</a>
-          <a id="repoGithub" class="btn" target="_blank" rel="noreferrer">GitHub</a>
-        </div>
-        <h4>README</h4>
-        <div id="repoReadme" class="readme md"></div>
+      </div>
+      <div id="repoDesc" class="desc"></div>
+      <div class="readme">
+        <h3>README</h3>
+        <div id="readmeBox" class="md"></div>
       </div>
     </section>
   </main>
 
   <footer class="foot">
-    <div>© 2025 Ximory · XGit</div>
-    <a href="https://xgit.ximory.com/">xgit.ximory.com</a>
+    <span>© 2025 XGit</span>
   </footer>
 
   <script src="./web.js"></script>
