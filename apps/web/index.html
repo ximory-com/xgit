@@ -3,105 +3,92 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>XGit • Web</title>
-  <link rel="icon" href="../../assets/logo.png">
+  <title>XGit • Web App</title>
+  <link rel="icon" href="../assets/logo.png">
   <link rel="stylesheet" href="./web.css">
 </head>
 <body>
+
+  <!-- XGIT:BEGIN toolbar -->
   <header class="topbar">
-    <div class="brand">
-      <a class="brand-link" href="https://xgit.ximory.com/" target="_self">
-        <img class="brand-logo" src="../../assets/logo.svg" alt="XGit">
+    <div class="left">
+      <a class="brand" href="https://xgit.ximory.com/" target="_self">
+        <img class="logo-mini" src="../assets/logo.svg" alt="XGit">
         <span class="brand-name">XGit</span>
       </a>
     </div>
-    <nav class="actions">
-      <div class="lang">
-        <button id="langZh" type="button">中文</button>
-        <button id="langEn" type="button">EN</button>
+    <nav class="right">
+      <a class="link" href="https://github.com/ximory-com/xgit" target="_blank" rel="noopener">GitHub</a>
+      <div class="lang-switch">
+        <button id="langZh" class="btn ghost">中文</button>
+        <button id="langEn" class="btn ghost">EN</button>
       </div>
-      <button id="btnBack" class="btn ghost" data-i18n="backToSite">返回官网</button>
-      <button id="btnSign" class="btn" data-i18n="signIn">用 Token 登录</button>
-      <button id="btnRefresh" class="btn ghost" data-i18n="refresh">刷新</button>
     </nav>
   </header>
+  <!-- XGIT:END toolbar -->
 
-  <main class="main">
-    <!-- Welcome card -->
-    <section class="card welcome" id="welcome">
-      <h1 data-i18n="welcomeTitle">欢迎使用 XGit Web</h1>
-      <p class="sub" data-i18n="welcomeSub">随时随地，轻松管理你的 GitHub 仓库。</p>
-      <div class="user" id="userBox" hidden>
-        <img id="userAvatar" class="avatar" alt="avatar">
-        <div class="user-meta">
-          <div id="userName" class="name">-</div>
-          <div class="muted" data-i18n="signedIn">已登录</div>
-        </div>
-        <div class="user-actions">
-          <button id="btnSignOut" class="btn danger" data-i18n="signOut">退出登录</button>
-        </div>
-      </div>
-      <div id="notSigned" class="muted" data-i18n="pleaseSignIn">请先登录</div>
-    </section>
+  <main class="container">
 
-    <!-- Repo list -->
-    <section class="card repos">
-      <div class="row head">
-        <h2 data-i18n="repos">仓库</h2>
-        <div class="row-actions">
-          <button id="repoReload" class="btn ghost" data-i18n="refresh">刷新</button>
-        </div>
-      </div>
-      <ul id="repoList" class="repo-list"></ul>
-    </section>
-
-    <!-- Repo detail (sticky card shown after click) -->
-    <section id="repoDetail" class="card repo-detail" hidden>
-      <div class="row head">
-        <div class="title">
-          <div id="repoFullName" class="repo-fullname">owner/name</div>
-          <div class="tags">
-            <span id="repoBranch" class="tag">main</span>
-            <span id="repoLang" class="tag">-</span>
+    <!-- XGIT:BEGIN hero -->
+    <section class="card" id="welcomeCard">
+      <div class="hero">
+        <div class="hero-text">
+          <h1 data-i18n="welcomeTitle">欢迎使用 XGit Web</h1>
+          <p data-i18n="welcomeSub">随时随地，轻松管理你的 GitHub 仓库。</p>
+          <div class="hero-cta">
+            <button id="btnSign2" class="btn primary" data-mode="in" data-i18n="signIn">用 Token 登录</button>
+            <button id="btnRefresh" class="btn" data-i18n="refresh">刷新</button>
           </div>
         </div>
-        <div class="row-actions">
-          <button id="btnOpenGH" class="btn ghost">GitHub</button>
-          <button id="btnZip" class="btn">ZIP</button>
+        <div class="hero-side">
+          <img class="logo-hero" src="../assets/logo.svg" alt="XGit Logo">
         </div>
       </div>
-      <div id="repoDesc" class="desc"></div>
-      <div class="readme">
-        <h3>README</h3>
-        <div id="readmeBox" class="md"></div>
+
+      <div id="userBox" class="userbox hidden">
+        <img id="userAvatar" class="avatar" alt="">
+        <div class="meta">
+          <div class="name" id="userName">-</div>
+          <div class="state chip" data-i18n="signedIn">已登录</div>
+        </div>
+        <div class="ops">
+          <button id="btnSign" class="btn danger" data-mode="out" data-i18n="signOut">退出登录</button>
+        </div>
       </div>
     </section>
-  </main>
+    <!-- XGIT:END hero -->
 
-  <footer class="foot">
-    <span>© 2025 XGit</span>
-  </footer>
+    <!-- XGIT:BEGIN repoList -->
+    <section class="card" id="repoListCard">
+      <div class="card-hd">
+        <h2 data-i18n="repos">仓库</h2>
+        <div class="tools">
+          <button id="repoReload" class="btn" data-i18n="refresh">刷新</button>
+        </div>
+      </div>
+      <div id="repoEmpty" class="empty" data-i18n="pleaseSignIn">请先登录</div>
+      <ul id="repoList" class="repolist hidden"></ul>
+    </section>
+    <!-- XGIT:END repoList -->
+
+    <!-- XGIT:BEGIN repoDetail -->
+    <section id="repoDetailCard" class="card hidden">
+      <div class="card-hd">
+        <h2 id="repoFullname">owner/repo</h2>
+        <div class="tools">
+          <button id="backToList" class="btn" data-i18n="back">返回</button>
+          <a id="repoGithubLink" class="btn ghost" href="#" target="_blank" rel="noopener">GitHub</a>
+          <button id="repoZip" class="btn" data-i18n="downloadZip">下载 ZIP</button>
+        </div>
+      </div>
+      <div id="repoMeta" class="meta-row"></div>
+      <h3 class="subttl" data-i18n="readme">README</h3>
+      <pre id="readmeBox" class="readme-box">-</pre>
+    </section>
+    <!-- XGIT:END repoDetail -->
+
+  </main>
 
   <script src="./web.js"></script>
 </body>
 </html>
-<!-- XGIT:BEGIN hero -->
-<!-- hero 区块（占位，无视觉变化），后续用 block 补丁替换这里的具体结构/文案 -->
-<div style="display:none"></div>
-
-<!-- XGIT:END hero -->
-<!-- XGIT:BEGIN toolbar -->
-<!-- toolbar 区块（占位，无视觉变化），后续用于统一导航按钮样式与布局 -->
-<div style="display:none"></div>
-
-<!-- XGIT:END toolbar -->
-<!-- XGIT:BEGIN repoList -->
-<!-- repoList 区块（占位，无视觉变化），后续用于替换仓库列表卡片模板 -->
-<div style="display:none"></div>
-
-<!-- XGIT:END repoList -->
-<!-- XGIT:BEGIN repoDetail -->
-<!-- repoDetail 区块（占位，无视觉变化），后续用于替换仓库详情与 README 渲染区域 -->
-<div style="display:none"></div>
-
-<!-- XGIT:END repoDetail -->
