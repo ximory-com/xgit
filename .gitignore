@@ -16,3 +16,8 @@ patch/文本.txt
 .DS_Store
 **/.DS_Store
 # XGIT:END XGIT_IGNORE
+
+# XGIT:BEGIN XGIT_IGNORE
+node_modules/
+
+# XGIT:END XGIT_IGNORE
