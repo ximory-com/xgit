@@ -21,3 +21,8 @@ patch/文本.txt
 node_modules/
 
 # XGIT:END XGIT_IGNORE
+
+# XGIT:BEGIN XGIT_IGNORE
+tmp/
+
+# XGIT:END XGIT_IGNORE
