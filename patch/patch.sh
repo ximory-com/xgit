@@ -1,14 +1,11 @@
 #!/usr/bin/env bash
-# XGit patch.sh (STRICT v1.6.3 TX+AutoClean)
-# - 事务性：失败即整单回滚到补丁前 HEAD（含 file/delete/mv/block/diff 全部效果）
-# - 干净策略 REQUIRE_CLEAN：
-#     1 (默认)  ：工作区/暂存区不干净则拒绝执行
-#     auto      ：执行前自动 reset --hard + clean -fd 清理脏区
-#     0         ：忽略干净检查（不建议）
-# - block：@index、append_once、嵌套锚点、缺失自动引导并可回滚引导
-# - diff：支持标准 unified diff（git apply --index -p<strip> …）
-# - 严格 EOF：最后一行必须等于 EOF_MARK（默认 "=== PATCH EOF ==="）
-# - Bash 3.2 兼容；默认推送开启（PUSH=1）
+# XGit patch.sh (STRICT v1.6.4)
+# - 事务：失败即整单回滚（trap ERR）+ EXIT 兜底
+# - 干净策略 REQUIRE_CLEAN：1(默认)=拒绝脏区 | auto=reset --hard + clean -fd | 0=忽略
+# - 僵尸锁自愈：.patch.lock/pid 不存活则自动清锁
+# - block：@index, append_once, 嵌套识别, 缺失自动引导(可回滚)
+# - diff：统一补丁 git apply（缺省 opts 安全；Bash 3.2 兼容）
+# - 严格 EOF；默认推送开启
 set -Eeuo pipefail
 IFS=$'\n\t'
 
@@ -17,30 +14,46 @@ PATCH_FILE_DEFAULT="${SCRIPT_DIR}/文本.txt"
 PATCH_FILE="${PATCH_FILE:-$PATCH_FILE_DEFAULT}"
 LOG_FILE="${SCRIPT_DIR}/patch.log"
 LOCK_DIR="${SCRIPT_DIR}/.patch.lock"
+LOCK_PID="${LOCK_DIR}/pid"
 EOF_MARK="${EOF_MARK:-=== PATCH EOF ===}"
 
 ts(){ date '+%F %T'; }
 log(){ echo "$(ts) $*" | tee -a "$LOG_FILE"; }
 
-# ---------- 单实例锁 ----------
+# ---------- 单实例锁（含僵尸锁自愈） ----------
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-  log "❌ 已有 patch 实例在运行，退出。"; exit 1
+  # 已存在；判断是否僵尸
+  if [[ -f "$LOCK_PID" ]]; then
+    old_pid="$(cat "$LOCK_PID" 2>/dev/null || true)"
+    if [[ -n "${old_pid:-}" ]] && ! ps -p "$old_pid" >/dev/null 2>&1; then
+      log "⚠️ 检测到僵尸锁(pid=$old_pid)，自动清理…"
+      rm -rf "$LOCK_DIR" || true
+      mkdir "$LOCK_DIR" || { log "❌ 无法重建锁目录"; exit 1; }
+    else
+      log "❌ 已有 patch 实例在运行，退出。"; exit 1
+    fi
+  else
+    log "⚠️ 锁目录存在但无 pid，尝试自愈…"
+    rm -rf "$LOCK_DIR" || true
+    mkdir "$LOCK_DIR" || { log "❌ 无法重建锁目录"; exit 1; }
+  fi
 fi
-cleanup_lock(){ rmdir "$LOCK_DIR" 2>/dev/null || true; }
-trap 'cleanup_lock' EXIT INT TERM
+echo "$$" > "$LOCK_PID"
+cleanup_lock(){ rm -rf "$LOCK_DIR" 2>/dev/null || true; }
+trap 'cleanup_lock' INT TERM
 
 # ---------- 补丁存在性 ----------
 if [[ ! -f "$PATCH_FILE" ]]; then
   log "ℹ️ 未找到补丁文件：$PATCH_FILE"
-  log "================ patch.sh end ================"; exit 0
+  log "================ patch.sh end ================"; cleanup_lock; exit 0
 fi
 
-# ---------- 工具 ----------
+# ---------- 通用工具 ----------
 trim(){ local s="${1%$'\r'}"; s="${s#"${s%%[![:space:]]*}"}"; s="${s%"${s##*[![:space:]]}"}"; printf '%s' "$s"; }
 lower(){ printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 upper(){ printf '%s' "$1" | tr '[:lower:]' '[:upper:]'; }
 
-norm_path(){ # 标准化路径 + 文件名大小写规范
+norm_path(){ # 标准化路径 + 名字大小写规范 + 去首尾空白
   local p="$(trim "$1")"
   p="$(printf '%s' "$p" | sed 's#//*#/#g; s#^\./##')"
   local dir base name ext ext_l
@@ -68,13 +81,12 @@ first_field(){ sed -n "s/^$1:[[:space:]]*//p; q" "$PATCH_FILE" | head -n1; }
 find_git_root(){ local s="$1"; while [[ -n "$s" && "$s" != "/" ]]; do [[ -d "$s/.git" ]] && { echo "$s"; return 0; }; s="$(dirname "$s")"; done; return 1; }
 is_repo(){ git -C "$1" rev-parse --is-inside-work-tree >/dev/null 2>&1; }
 
-# ---------- 仓库定位（候选 + 缓存） ----------
+# ---------- 仓库定位（映射 + 缓存 + 兄弟目录 + 向上查找） ----------
 PATCH_DIR="$(cd "$(dirname "$PATCH_FILE")" && pwd -P)"
 MAP_PATCH="$PATCH_DIR/.repos"; MAP_SCRIPT="$SCRIPT_DIR/.repos"; MAP_GLOBAL="$HOME/.config/xgit/repos"
 CACHE_PATCH="$PATCH_DIR/.repo";  CACHE_GLOBAL="$HOME/.config/xgit/repo"
 
-repo_from_maps(){ # name->path
-  local name="$1"; local f line k v
+repo_from_maps(){ local name="$1"; local f line k v
   for f in "$MAP_PATCH" "$MAP_SCRIPT" "$MAP_GLOBAL"; do
     [[ -f "$f" ]] || continue
     while IFS= read -r line || [[ -n "$line" ]]; do
@@ -131,9 +143,11 @@ REPO=""
 for c in "${uniq_candidates[@]:-}"; do if is_repo "$c"; then REPO="$c"; break; fi; done
 if [[ -z "$REPO" ]]; then
   log "❌ 未能自动定位 Git 仓库根目录。可在补丁头写 repo: /abs/path 或 repo: <name>（配合 .repos），或导出 REPO=/abs/path。"
-  exit 1
+  false
 fi
-mkdir -p "$(dirname "$CACHE_GLOBAL")"; printf '%s\n' "$REPO" >"$CACHE_PATCH"; printf '%s\n' "$REPO" >"$CACHE_GLOBAL"
+mkdir -p "$(dirname "$CACHE_GLOBAL")"
+printf '%s\n' "$REPO" >"$CACHE_PATCH"
+printf '%s\n' "$REPO" >"$CACHE_GLOBAL"
 
 log "================ patch.sh begin ================"
 log "📂 仓库根目录：$REPO"
@@ -148,7 +162,8 @@ log "👤 提交作者：${AUTHOR_LINE:-(空)}"
 # ---------- 严格 EOF ----------
 LAST_MEANINGFUL_LINE="$(awk 'NF{last=$0} END{print last}' "$PATCH_FILE")"
 if [ "${LAST_MEANINGFUL_LINE:-}" != "${EOF_MARK:-}" ]; then
-  log "❌ 严格 EOF 校验失败：期望『${EOF_MARK:-}』，实得『${LAST_MEANINGFUL_LINE:-}'}"; exit 1
+  log "❌ 严格 EOF 校验失败：期望『${EOF_MARK:-}』，实得『${LAST_MEANINGFUL_LINE:-}』"
+  false
 fi
 
 # ---------- 解析补丁 ----------
@@ -223,7 +238,7 @@ case "${REQUIRE_CLEAN:-1}" in
   auto)
     log "ℹ️ 自动清理：git reset --hard && git clean -fd"
     git reset --hard >/dev/null
-    git clean -fd >/dev/null
+    git clean -fd   >/dev/null
     ;;
   1|true|yes)
     if { ! git diff --quiet || ! git diff --cached --quiet; }; then
@@ -231,8 +246,7 @@ case "${REQUIRE_CLEAN:-1}" in
       false
     fi
     ;;
-  0|false|no)
-    : ;; # 忽略
+  0|false|no) : ;;
   *)
     log "⚠️ 未知 REQUIRE_CLEAN='${REQUIRE_CLEAN:-}'，按默认 1 处理"
     if { ! git diff --quiet || ! git diff --cached --quiet; }; then
@@ -250,9 +264,9 @@ rollback(){
   log "↩️ 已回滚到 ${START_HEAD:-HEAD}"
 }
 trap 'log "❌ 出错，回滚中…"; rollback' ERR
-trap 'rc=$?; if [[ $rc -ne 0 && ${TX_DONE:-0} -eq 0 ]]; then log "⚠️ 非零退出($rc)，执行兜底回滚…"; rollback; fi' EXIT
+trap 'rc=$?; if [[ $rc -ne 0 && ${TX_DONE:-0} -eq 0 ]]; then log "⚠️ 非零退出($rc)，执行兜底回滚…"; rollback; fi; cleanup_lock' EXIT
 
-# mv
+# ---------- mv / delete ----------
 for (( i=0; i<${#moves_from[@]:-0}; i++ )); do
   from="${moves_from[$i]-}"; to="${moves_to[$i]-}"
   [[ -z "${from:-}" || -z "${to:-}" ]] && continue
@@ -261,7 +275,6 @@ for (( i=0; i<${#moves_from[@]:-0}; i++ )); do
   else log "ℹ️ 跳过改名（不存在）：$from"; fi
 done
 
-# delete
 for d in "${deletes_todo[@]:-}"; do
   [[ -z "${d:-}" ]] && continue
   ensure_canonical_in_repo "$d"
@@ -269,7 +282,7 @@ for d in "${deletes_todo[@]:-}"; do
   else log "ℹ️ 跳过删除（不存在）：$d"; fi
 done
 
-# file
+# ---------- file 写入 ----------
 for (( i=0; i<${#files_todo[@]:-0}; i++ )); do
   p="${files_todo[$i]-}"; tmp="${files_tmp[$i]-}"
   [[ -z "${p:-}" || -z "${tmp:-}" ]] && continue
@@ -280,7 +293,7 @@ for (( i=0; i<${#files_todo[@]:-0}; i++ )); do
 done
 for t in "${files_tmp[@]:-}"; do rm -f "$t" 2>/dev/null || true; done
 
-# block（嵌套 + 引导 + append_once）
+# ---------- block 应用（嵌套 + 引导 + append_once） ----------
 apply_block(){
   local rel="$1" anchor="$2" mode="$3" content_file="$4" index="${5:-1}"
   local file="$REPO/$rel"
@@ -402,11 +415,11 @@ for (( i=0; i<${#blocks_path[@]:-0}; i++ )); do
 done
 for t in "${blocks_tmp[@]:-}"; do rm -f "$t" 2>/dev/null || true; done
 
-# diff（统一补丁）
+# ---------- diff（统一补丁；opts 缺省安全） ----------
 apply_diff(){
-  local tmp="$1"; local opts="$2"
+  local tmp="${1-}"; local opts="${2-}"
   local mode="apply" strip="1" whitespace="nowarn" threeway="0" reverse="0" subpath=""
-  for tok in $opts; do
+  for tok in ${opts:-}; do
     case "$tok" in
       mode=*) mode="${tok#mode=}" ;;
       strip=*) strip="${tok#strip=}" ;;
@@ -417,22 +430,22 @@ apply_diff(){
     esac
   done
   local args=(--index "-p${strip}" "--whitespace=${whitespace}")
-  [[ "$threeway" == "1" ]] && args+=("-3")
+  [[ "${threeway:-0}" == "1" ]] && args+=("-3")
   if [[ "$reverse" == "1" || "$mode" == "reverse" ]]; then args+=(--reverse); fi
   local workdir="$REPO"; [[ -n "$subpath" ]] && workdir="$REPO/$subpath"
   if ! git -C "$workdir" apply --check "${args[@]}" "$tmp" >/dev/null 2>&1; then
-    log "❌ git apply --check 失败：$opts"
+    log "❌ git apply --check 失败：${opts:-<none>}"
     git -C "$workdir" apply --check "${args[@]}" "$tmp" || true
     return 1
   fi
   git -C "$workdir" apply "${args[@]}" "$tmp"
-  log "✅ 已应用 diff（$opts）"
+  log "✅ 已应用 diff（${opts:-<none>}）"
   return 0
 }
 for (( i=0; i<${#diffs_tmp[@]:-0}; i++ )); do
   dt="${diffs_tmp[$i]-}"; dopts="${diffs_opts[$i]-}"
   [[ -z "${dt:-}" ]] && continue
-  if ! apply_diff "$dt" "$dopts"; then log "❌ diff 应用失败：$dopts"; false; fi
+  if ! apply_diff "$dt" "${dopts-}"; then log "❌ diff 应用失败：${dopts-}"; false; fi
 done
 for t in "${diffs_tmp[@]:-}"; do rm -f "$t" 2>/dev/null || true; done
 
