@@ -1,47 +1,126 @@
 #!/usr/bin/env bash
-#（仓库内同款副本，内容与上面完全一致，便于从仓库直接调用）
-# XGit patch.sh (STRICT v1.6 TX)
+# 同步仓库内副本，与 patch/patch.sh 内容完全一致（v1.6.3 TX+AutoClean）
 set -Eeuo pipefail
 IFS=$'\n\t'
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 PATCH_FILE_DEFAULT="${SCRIPT_DIR}/文本.txt"
 PATCH_FILE="${PATCH_FILE:-$PATCH_FILE_DEFAULT}"
 LOG_FILE="${SCRIPT_DIR}/patch.log"
 LOCK_DIR="${SCRIPT_DIR}/.patch.lock"
 EOF_MARK="${EOF_MARK:-=== PATCH EOF ===}"
+
 ts(){ date '+%F %T'; }
 log(){ echo "$(ts) $*" | tee -a "$LOG_FILE"; }
-if ! mkdir "$LOCK_DIR" 2>/dev/null; then log "❌ 已有 patch 实例在运行，退出。"; exit 1; fi
-trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT INT TERM
-if [[ ! -f "$PATCH_FILE" ]]; then log "ℹ️ 未找到补丁文件：$PATCH_FILE"; log "================ patch.sh end ================"; exit 0; fi
+
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  log "❌ 已有 patch 实例在运行，退出。"; exit 1
+fi
+cleanup_lock(){ rmdir "$LOCK_DIR" 2>/dev/null || true; }
+trap 'cleanup_lock' EXIT INT TERM
+
+if [[ ! -f "$PATCH_FILE" ]]; then
+  log "ℹ️ 未找到补丁文件：$PATCH_FILE"
+  log "================ patch.sh end ================"; exit 0
+fi
+
 trim(){ local s="${1%$'\r'}"; s="${s#"${s%%[![:space:]]*}"}"; s="${s%"${s##*[![:space:]]}"}"; printf '%s' "$s"; }
 lower(){ printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 upper(){ printf '%s' "$1" | tr '[:lower:]' '[:upper:]'; }
+
 norm_path(){ local p="$(trim "$1")"; p="$(printf '%s' "$p" | sed 's#//*#/#g; s#^\./##')"; local dir base name ext ext_l; dir="$(dirname "$p")"; base="$(basename "$p")"; if [[ "$base" == *.* ]]; then name="${base%.*}"; ext="${base##*.}"; else name="$base"; ext=""; fi; ext_l="$(lower "$ext")"; if [[ -z "$ext" || "$ext_l" == "md" ]]; then name="$(upper "$name")"; else name="$(lower "$name")"; fi; local base2="$name"; [[ -n "$ext_l" ]] && base2="${name}.${ext_l}"; [[ "$dir" == "." ]] && printf '%s\n' "$base2" || printf '%s/%s\n' "$dir" "$base2"; }
 ensure_canonical_in_repo(){ local want="$1"; local abs="$REPO/$want"; mkdir -p "$(dirname "$abs")"; if [[ -e "$abs" ]]; then return 0; fi; local parent leaf hit; parent="$(dirname "$want")"; leaf="$(basename "$want")"; hit="$( (cd "$REPO/$parent" 2>/dev/null && find . -maxdepth 1 -iname "$leaf" -print | sed 's#^\./##') || true )"; if [[ -n "$hit" && "$hit" != "$leaf" && -e "$REPO/$parent/$hit" ]]; then ( cd "$REPO" && git mv -f "$parent/$hit" "$want" ) || true; fi; }
 first_field(){ sed -n "s/^$1:[[:space:]]*//p; q" "$PATCH_FILE" | head -n1; }
 find_git_root(){ local s="$1"; while [[ -n "$s" && "$s" != "/" ]]; do [[ -d "$s/.git" ]] && { echo "$s"; return 0; }; s="$(dirname "$s")"; done; return 1; }
 is_repo(){ git -C "$1" rev-parse --is-inside-work-tree >/dev/null 2>&1; }
-PATCH_DIR="$(cd "$(dirname "$PATCH_FILE")" && pwd -P)"; MAP_PATCH="$PATCH_DIR/.repos"; MAP_SCRIPT="$SCRIPT_DIR/.repos"; MAP_GLOBAL="$HOME/.config/xgit/repos"; CACHE_PATCH="$PATCH_DIR/.repo"; CACHE_GLOBAL="$HOME/.config/xgit/repo"
-repo_from_maps(){ local name="$1"; local f line k v; for f in "$MAP_PATCH" "$MAP_SCRIPT" "$MAP_GLOBAL"; do [[ -f "$f" ]] || continue; while IFS= read -r line || [[ -n "$line" ]]; do line="${line%%#*}"; line="${line%%;*}"; line="$(trim "$line")"; [[ -z "$line" ]] && continue; if echo "$line" | grep -qE '^[[:space:]]*default[[:space:]]*='; then v="$(echo "$line" | sed -E 's/^[[:space:]]*default[[:space:]]*=[[:space:]]*(\S+).*/\1/')"; [[ "$name" == "default" ]] && { printf '%s\n' "$v"; return 0; }; elif echo "$line" | grep -qE '^[^=[:space:]]+[[:space:]]*='; then k="$(echo "$line" | sed -E 's/^([^=[:space:]]+).*/\1/')"; v="$(echo "$line" | sed -E 's/^[^=[:space:]]+[[:space:]]*=[[:space:]]*(.+)$/\1/')"; [[ "$k" == "$name" ]] && { printf '%s\n' "$v"; return 0; }; elif echo "$line" | grep -qE '^[^[:space:]]+[[:space:]]+/'; then k="$(echo "$line" | awk '{print $1}')"; v="$(echo "$line" | sed -E 's/^[^[:space:]]+[[:space:]]+(.+)$/\1/')"; [[ "$k" == "$name" ]] && { printf '%s\n' "$v"; return 0; }; fi; done < "$f"; done; return 1; }
-scan_sibling_repo(){ local base="$1"; local parent="$(dirname "$base")"; local hits=0 last=""; while IFS= read -r d; do [[ -d "$d/.git" ]] || continue; hits=$((hits+1)); last="$d"; done < <(find "$parent" -mindepth 1 -maxdepth 1 -type d 2>/dev/null); [[ $hits -eq 1 ]] && printf '%s\n' "$last" || printf '%s\n' ""; }
-candidates=(); [[ -n "${REPO:-}" ]] && candidates+=("$(trim "$REPO")"); REPO_HDR="$(trim "$(first_field repo || true)")"
-if [[ -n "$REPO_HDR" ]]; then if [[ "$REPO_HDR" = /* ]]; then candidates+=("$REPO_HDR"); else if MAP_PATH="$(repo_from_maps "$REPO_HDR" 2>/dev/null || true)"; then candidates+=("$MAP_PATH"); elif MAP_DEF_NAME="$(repo_from_maps default 2>/dev/null || true)"; then if MAP_DEF_PATH="$(repo_from_maps "$MAP_DEF_NAME" 2>/dev/null || true)"; then candidates+=("$MAP_DEF_PATH"); fi; fi; fi; fi
-[[ -f "$CACHE_PATCH"  ]] && candidates+=("$(trim "$(cat "$CACHE_PATCH")")"); [[ -f "$CACHE_GLOBAL" ]] && candidates+=("$(trim "$(cat "$CACHE_GLOBAL")")")
-sib1="$(scan_sibling_repo "$SCRIPT_DIR")"; [[ -n "$sib1" ]] && candidates+=("$sib1"); sib2="$(scan_sibling_repo "$PATCH_DIR")"; [[ -n "$sib2" ]] && candidates+=("$sib2")
-root1="$(find_git_root "$SCRIPT_DIR" || true)"; [[ -n "$root1" ]] && candidates+=("$root1"); root2="$(find_git_root "$PATCH_DIR"  || true)"; [[ -n "$root2" ]] && candidates+=("$root2")
-uniq_candidates=(); for c in "${candidates[@]:-}"; do [[ -z "$c" ]] && continue; c="$(python3 - <<'PY' "$c"
+
+PATCH_DIR="$(cd "$(dirname "$PATCH_FILE")" && pwd -P)"
+MAP_PATCH="$PATCH_DIR/.repos"; MAP_SCRIPT="$SCRIPT_DIR/.repos"; MAP_GLOBAL="$HOME/.config/xgit/repos"
+CACHE_PATCH="$PATCH_DIR/.repo";  CACHE_GLOBAL="$HOME/.config/xgit/repo"
+
+repo_from_maps(){ local name="$1"; local f line k v
+  for f in "$MAP_PATCH" "$MAP_SCRIPT" "$MAP_GLOBAL"; do
+    [[ -f "$f" ]] || continue
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line="${line%%#*}"; line="${line%%;*}"; line="$(trim "$line")"; [[ -z "$line" ]] && continue
+      if echo "$line" | grep -qE '^[[:space:]]*default[[:space:]]*='; then
+        v="$(echo "$line" | sed -E 's/^[[:space:]]*default[[:space:]]*=[[:space:]]*(\S+).*/\1/')"; [[ "$name" == "default" ]] && { printf '%s\n' "$v"; return 0; }
+      elif echo "$line" | grep -qE '^[^=[:space:]]+[[:space:]]*='; then
+        k="$(echo "$line" | sed -E 's/^([^=[:space:]]+).*/\1/')"; v="$(echo "$line" | sed -E 's/^[^=[:space:]]+[[:space:]]*=[[:space:]]*(.+)$/\1/')"; [[ "$k" == "$name" ]] && { printf '%s\n' "$v"; return 0; }
+      elif echo "$line" | grep -qE '^[^[:space:]]+[[:space:]]+/'; then
+        k="$(echo "$line" | awk '{print $1}')"; v="$(echo "$line" | sed -E 's/^[^[:space:]]+[[:space:]]+(.+)$/\1/')"; [[ "$k" == "$name" ]] && { printf '%s\n' "$v"; return 0; }
+      fi
+    done < "$f"
+  done
+  return 1
+}
+
+scan_sibling_repo(){ local base="$1"; local parent="$(dirname "$base")"; local hits=0 last=""
+  while IFS= read -r d; do [[ -d "$d/.git" ]] || continue; hits=$((hits+1)); last="$d"; done < <(find "$parent" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)
+  [[ $hits -eq 1 ]] && printf '%s\n' "$last" || printf '%s\n' ""
+}
+
+candidates=()
+[[ -n "${REPO:-}" ]] && candidates+=("$(trim "$REPO")")
+REPO_HDR="$(trim "$(first_field repo || true)")"
+if [[ -n "$REPO_HDR" ]]; then
+  if [[ "$REPO_HDR" = /* ]]; then candidates+=("$REPO_HDR")
+  else
+    if MAP_PATH="$(repo_from_maps "$REPO_HDR" 2>/dev/null || true)"; then candidates+=("$MAP_PATH")
+    elif MAP_DEF_NAME="$(repo_from_maps default 2>/dev/null || true)"; then
+      if MAP_DEF_PATH="$(repo_from_maps "$MAP_DEF_NAME" 2>/dev/null || true)"; then candidates+=("$MAP_DEF_PATH"); fi
+    fi
+  fi
+fi
+[[ -f "$CACHE_PATCH"  ]] && candidates+=("$(trim "$(cat "$CACHE_PATCH")")")
+[[ -f "$CACHE_GLOBAL" ]] && candidates+=("$(trim "$(cat "$CACHE_GLOBAL")")")
+sib1="$(scan_sibling_repo "$SCRIPT_DIR")"; [[ -n "$sib1" ]] && candidates+=("$sib1")
+sib2="$(scan_sibling_repo "$PATCH_DIR")";  [[ -n "$sib2" ]] && candidates+=("$sib2")
+root1="$(find_git_root "$SCRIPT_DIR" || true)"; [[ -n "$root1" ]] && candidates+=("$root1")
+root2="$(find_git_root "$PATCH_DIR"  || true)"; [[ -n "$root2" ]] && candidates+=("$root2")
+
+uniq_candidates=()
+for c in "${candidates[@]:-}"; do
+  [[ -z "$c" ]] && continue
+  c="$(python3 - <<'PY' "$c"
 import os,sys; print(os.path.realpath(sys.argv[1]))
 PY
-)"; skip=0; for u in "${uniq_candidates[@]:-}"; do [[ "$u" == "$c" ]] && { skip=1; break; }; done; [[ $skip -eq 1 ]] && continue; uniq_candidates+=("$c"); done
-REPO=""; for c in "${uniq_candidates[@]:-}"; do if is_repo "$c"; then REPO="$c"; break; fi; done
-if [[ -z "$REPO" ]]; then log "❌ 未能自动定位 Git 仓库根目录。可在补丁头写 repo: /abs/path 或 repo: <name>（配合 .repos），或导出 REPO=/abs/path。"; exit 1; fi
+)"; skip=0
+  for u in "${uniq_candidates[@]:-}"; do [[ "$u" == "$c" ]] && { skip=1; break; }; done
+  [[ $skip -eq 1 ]] && continue
+  uniq_candidates+=("$c")
+done
+
+REPO=""
+for c in "${uniq_candidates[@]:-}"; do if is_repo "$c"; then REPO="$c"; break; fi; done
+if [[ -z "$REPO" ]]; then
+  log "❌ 未能自动定位 Git 仓库根目录。可在补丁头写 repo: /abs/path 或 repo: <name>（配合 .repos），或导出 REPO=/abs/path。"
+  exit 1
+fi
 mkdir -p "$(dirname "$CACHE_GLOBAL")"; printf '%s\n' "$REPO" >"$CACHE_PATCH"; printf '%s\n' "$REPO" >"$CACHE_GLOBAL"
-log "================ patch.sh begin ================"; log "📂 仓库根目录：$REPO"; log "📄 补丁文件：$PATCH_FILE"
-COMMIT_MSG="$(trim "$(first_field commitmsg || true)")"; AUTHOR_LINE="$(trim "$(first_field author || true)")"; log "📝 提交说明：${COMMIT_MSG:-(空)}"; log "👤 提交作者：${AUTHOR_LINE:-(空)}"
-LAST_MEANINGFUL_LINE="$(awk 'NF{last=$0} END{print last}' "$PATCH_FILE")"; if [ "${LAST_MEANINGFUL_LINE:-}" != "${EOF_MARK:-}" ]; then log "❌ 严格 EOF 校验失败：期望『${EOF_MARK:-}』，实得『${LAST_MEANINGFUL_LINE:-}』"; exit 1; fi
-files_todo=(); files_tmp=(); deletes_todo=(); moves_from=(); moves_to=(); blocks_path=(); blocks_anchor=(); blocks_mode=(); blocks_tmp=(); blocks_index=(); diffs_tmp=(); diffs_opts=()
+
+log "================ patch.sh begin ================"
+log "📂 仓库根目录：$REPO"
+log "📄 补丁文件：$PATCH_FILE"
+
+COMMIT_MSG="$(trim "$(first_field commitmsg || true)")"
+AUTHOR_LINE="$(trim "$(first_field author || true)")"
+log "📝 提交说明：${COMMIT_MSG:-(空)}"
+log "👤 提交作者：${AUTHOR_LINE:-(空)}"
+
+LAST_MEANINGFUL_LINE="$(awk 'NF{last=$0} END{print last}' "$PATCH_FILE")"
+if [ "${LAST_MEANINGFUL_LINE:-}" != "${EOF_MARK:-}" ]; then
+  log "❌ 严格 EOF 校验失败：期望『${EOF_MARK:-}』，实得『${LAST_MEANINGFUL_LINE:-}'}"; exit 1
+fi
+
+files_todo=(); files_tmp=()
+deletes_todo=()
+moves_from=(); moves_to=()
+blocks_path=(); blocks_anchor=(); blocks_mode=(); blocks_tmp=(); blocks_index=()
+diffs_tmp=(); diffs_opts=()
+
 in_block=0; cur_path=""; cur_tmp=""; cur_anchor=""; cur_mode=""; cur_index=""; cur_diff_opts=""
+
 while IFS= read -r raw || [[ -n "$raw" ]]; do
   line="${raw%$'\r'}"
   if [[ $in_block -eq 0 ]] && echo "$line" | grep -qE '^=== file:'; then cur_path="$(norm_path "$(trim "$(echo "$line" | sed -E 's/^=== file:[[:space:]]*(.+)[[:space:]]*===$/\1/')")")"; cur_tmp="$(mktemp)"; in_block=1; continue; fi
@@ -55,17 +134,30 @@ while IFS= read -r raw || [[ -n "$raw" ]]; do
   if [[ "$line" == "${EOF_MARK:-}" ]]; then break; fi
   if [[ $in_block -eq 1 || $in_block -eq 2 || $in_block -eq 3 ]]; then printf '%s\n' "$line" >>"$cur_tmp"; fi
 done < "$PATCH_FILE"
-if [[ $in_block -ne 0 ]]; then log "❌ 补丁块未正常结束。"; exit 1; fi
+
+if [[ $in_block -ne 0 ]]; then log "❌ 补丁块未正常结束。"; false; fi
 log "📦 统计：file=${#files_todo[@]} delete=${#deletes_todo[@]} mv=${#moves_from[@]} block=${#blocks_path[@]} diff=${#diffs_tmp[@]}"
+
 cd "$REPO"
-if [[ "${REQUIRE_CLEAN:-1}" == "1" ]] && { ! git diff --quiet || ! git diff --cached --quiet; }; then log "❌ 工作区不干净；为保证事务性已中止（设 REQUIRE_CLEAN=0 可忽略）"; exit 1; fi
-START_HEAD="$(git rev-parse --verify HEAD 2>/dev/null || true)"; TX_ACTIVE=1
+
+case "${REQUIRE_CLEAN:-1}" in
+  auto) log "ℹ️ 自动清理：git reset --hard && git clean -fd"; git reset --hard >/dev/null; git clean -fd >/dev/null ;;
+  1|true|yes) if { ! git diff --quiet || ! git diff --cached --quiet; }; then log "❌ 工作区不干净；为保证事务性已中止（REQUIRE_CLEAN=auto 可自动清理，=0 忽略）"; false; fi ;;
+  0|false|no) : ;;
+  *) log "⚠️ 未知 REQUIRE_CLEAN='${REQUIRE_CLEAN:-}'，按默认 1 处理"; if { ! git diff --quiet || ! git diff --cached --quiet; }; then log "❌ 工作区不干净；为保证事务性已中止"; false; fi ;;
+esac
+
+START_HEAD="$(git rev-parse --verify HEAD 2>/dev/null || true)"
+TX_DONE=0
 rollback(){ git reset --hard "${START_HEAD:-HEAD}" >/dev/null 2>&1 || true; git clean -fd >/dev/null 2>&1 || true; log "↩️ 已回滚到 ${START_HEAD:-HEAD}"; }
 trap 'log "❌ 出错，回滚中…"; rollback' ERR
+trap 'rc=$?; if [[ $rc -ne 0 && ${TX_DONE:-0} -eq 0 ]]; then log "⚠️ 非零退出($rc)，执行兜底回滚…"; rollback; fi' EXIT
+
 for (( i=0; i<${#moves_from[@]:-0}; i++ )); do from="${moves_from[$i]-}"; to="${moves_to[$i]-}"; [[ -z "${from:-}" || -z "${to:-}" ]] && continue; ensure_canonical_in_repo "$from"; ensure_canonical_in_repo "$to"; if [[ -e "$from" ]]; then mkdir -p "$(dirname "$to")"; git mv -f "$from" "$to" || true; log "🔁 改名：$from => $to"; else log "ℹ️ 跳过改名（不存在）：$from"; fi; done
 for d in "${deletes_todo[@]:-}"; do [[ -z "${d:-}" ]] && continue; ensure_canonical_in_repo "$d"; if [[ -e "$d" ]]; then git rm -f "$d" || true; log "🗑️ 删除：$d"; else log "ℹ️ 跳过删除（不存在）：$d"; fi; done
 for (( i=0; i<${#files_todo[@]:-0}; i++ )); do p="${files_todo[$i]-}"; tmp="${files_tmp[$i]-}"; [[ -z "${p:-}" || -z "${tmp:-}" ]] && continue; ensure_canonical_in_repo "$p"; mkdir -p "$(dirname "$p")"; LC_ALL=C sed -e 's/\r$//' <"$tmp" >"$p"; if [ -s "$p" ] && [ "$(tail -c1 "$p" 2>/dev/null | wc -c)" -ne 0 ]; then printf '\n' >>"$p"; fi; git add "$p"; log "✅ 写入文件：$p"; done
 for t in "${files_tmp[@]:-}"; do rm -f "$t" 2>/dev/null || true; done
+
 apply_block(){ local rel="$1" anchor="$2" mode="$3" content_file="$4" index="${5:-1}"; local file="$REPO/$rel"; [[ -e "$file" ]] || { mkdir -p "$(dirname "$file")"; :> "$file"; }
   locate_and_apply(){ local file="$1" anchor="$2" mode="$3" content_file="$4" index="$5"
     read -r start end total < <(python3 - "$file" "$anchor" "$index" <<'PY'
@@ -128,15 +220,17 @@ PY
   if [[ "$booted" -eq 1 ]]; then local l1="<!-- XGIT:BEGIN ${anchor} -->"; local l2="<!-- XGIT:END ${anchor} -->"; local tail2; tail2="$(tail -n 2 "$file" 2>/dev/null || true)"; if printf '%s\n' "$tail2" | grep -Fqx "$l1"$'\n'"$l2"; then local n; n="$(wc -l < "$file" | tr -d ' ')"; if [[ "${n:-0}" -ge 2 ]]; then head -n $((n-2)) "$file" >"$file.tmp" && mv -f "$file.tmp" "$file"; log "↩️ 回滚引导锚点：$rel #$anchor"; fi; fi; fi
   log "❌ 未找到锚区或 index 超界：$rel #$anchor @index=$index"; return 1
 }
-for (( i=0; i<${#blocks_path[@]:-0}; i++ )); do p="${blocks_path[$i]-}"; a="${blocks_anchor[$i]-}"; m="${blocks_mode[$i]-}"; tmp="${blocks_tmp[$i]-}"; idx="${blocks_index[$i]-}"; [[ -z "${p:-}" || -z "${a:-}" || -z "${tmp:-}" || -z "${idx:-}" ]] && continue; ensure_canonical_in_repo "$p"; mkdir -p "$(dirname "$p")"; if apply_block "$p" "$a" "$m" "$tmp" "$idx"; then git add "$p"; log "✅ 区块：$p #$a ($m @index=$idx)"; else log "❌ 区块失败：$p #$a ($m @index=$idx)"; exit 1; fi; done
+for (( i=0; i<${#blocks_path[@]:-0}; i++ )); do p="${blocks_path[$i]-}"; a="${blocks_anchor[$i]-}"; m="${blocks_mode[$i]-}"; tmp="${blocks_tmp[$i]-}"; idx="${blocks_index[$i]-}"; [[ -z "${p:-}" || -z "${a:-}" || -z "${tmp:-}" || -z "${idx:-}" ]] && continue; ensure_canonical_in_repo "$p"; mkdir -p "$(dirname "$p")"; if apply_block "$p" "$a" "$m" "$tmp" "$idx"; then git add "$p"; log "✅ 区块：$p #$a ($m @index=$idx)"; else log "❌ 区块失败：$p #$a ($m @index=$idx)"; false; fi; done
 for t in "${blocks_tmp[@]:-}"; do rm -f "$t" 2>/dev/null || true; done
+
 apply_diff(){ local tmp="$1"; local opts="$2"; local mode="apply" strip="1" whitespace="nowarn" threeway="0" reverse="0" subpath=""; for tok in $opts; do case "$tok" in mode=*) mode="${tok#mode=}" ;; strip=*) strip="${tok#strip=}" ;; whitespace=*) whitespace="${tok#whitespace=}" ;; threeway=1|threeway=true) threeway="1" ;; reverse=1|reverse=true) reverse="1" ;; path=*) subpath="$(trim "${tok#path=}")" ;; esac; done; local args=(--index "-p${strip}" "--whitespace=${whitespace}"); [[ "$threeway" == "1" ]] && args+=("-3"); if [[ "$reverse" == "1" || "$mode" == "reverse" ]]; then args+=(--reverse); fi; local workdir="$REPO"; [[ -n "$subpath" ]] && workdir="$REPO/$subpath"; if ! git -C "$workdir" apply --check "${args[@]}" "$tmp" >/dev/null 2>&1; then log "❌ git apply --check 失败：$opts"; git -C "$workdir" apply --check "${args[@]}" "$tmp" || true; return 1; fi; git -C "$workdir" apply "${args[@]}" "$tmp"; log "✅ 已应用 diff（$opts）"; return 0; }
-for (( i=0; i<${#diffs_tmp[@]:-0}; i++ )); do dt="${diffs_tmp[$i]-}"; dopts="${diffs_opts[$i]-}"; [[ -z "${dt:-}" ]] && continue; if ! apply_diff "$dt" "$dopts"; then log "❌ diff 应用失败：$dopts"; exit 1; fi; done
+for (( i=0; i<${#diffs_tmp[@]:-0}; i++ )); do dt="${diffs_tmp[$i]-}"; dopts="${diffs_opts[$i]-}"; [[ -z "${dt:-}" ]] && continue; if ! apply_diff "$dt" "$dopts"; then log "❌ diff 应用失败：$dopts"; false; fi; done
 for t in "${diffs_tmp[@]:-}"; do rm -f "$t" 2>/dev/null || true; done
-if git diff --cached --quiet; then log "ℹ️ 无改动需要提交。"; TX_ACTIVE=0; trap - ERR; log "================ patch.sh end ================"; exit 0; fi
+
+if git diff --cached --quiet; then log "ℹ️ 无改动需要提交。"; TX_DONE=1; log "================ patch.sh end ================"; exit 0; fi
 if [[ -n "${AUTHOR_LINE:-}" ]]; then git commit --author "$AUTHOR_LINE" -m "${COMMIT_MSG:-chore: apply patch}" >/dev/null; else git commit -m "${COMMIT_MSG:-chore: apply patch}" >/dev/null; fi
 log "✅ 已提交：${COMMIT_MSG:-chore: apply patch}"
-if [[ "${PUSH:-1}" == "1" ]]; then log "🚀 正在推送…"; if git push origin HEAD >/dev/null; then log "🚀 推送完成"; TX_ACTIVE=0; trap - ERR; else log "❌ 推送失败；开始回滚"; rollback; TX_ACTIVE=0; trap - ERR; exit 1; fi
-else log "ℹ️ 已禁用推送（PUSH=0）"; TX_ACTIVE=0; trap - ERR; fi
+if [[ "${PUSH:-1}" == "1" ]]; then log "🚀 正在推送…"; if git push origin HEAD >/dev/null; then log "🚀 推送完成"; TX_DONE=1; else log "❌ 推送失败；开始回滚"; rollback; TX_DONE=1; exit 1; fi
+else log "ℹ️ 已禁用推送（PUSH=0）"; TX_DONE=1; fi
 log "================ patch.sh end ================"
 

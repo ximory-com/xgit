@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
-# XGit patch.sh (STRICT v1.6 TX)
-# - 事务性：失败即整单回滚到补丁前的 HEAD（含文件新增/删除/改名/block/diff）
-# - 默认要求工作区干净（REQUIRE_CLEAN=1；需放宽可设为 0）
-# - 保留 v1.5.x 能力：file/delete/mv、block(@index/append_once/自动引导/嵌套识别)、diff(git apply)
-# - Bash 3.2 兼容；严格 EOF；大小写/空白规范；默认推送开启
+# XGit patch.sh (STRICT v1.6.3 TX+AutoClean)
+# - 事务性：失败即整单回滚到补丁前 HEAD（含 file/delete/mv/block/diff 全部效果）
+# - 干净策略 REQUIRE_CLEAN：
+#     1 (默认)  ：工作区/暂存区不干净则拒绝执行
+#     auto      ：执行前自动 reset --hard + clean -fd 清理脏区
+#     0         ：忽略干净检查（不建议）
+# - block：@index、append_once、嵌套锚点、缺失自动引导并可回滚引导
+# - diff：支持标准 unified diff（git apply --index -p<strip> …）
+# - 严格 EOF：最后一行必须等于 EOF_MARK（默认 "=== PATCH EOF ==="）
+# - Bash 3.2 兼容；默认推送开启（PUSH=1）
 set -Eeuo pipefail
 IFS=$'\n\t'
 
@@ -21,7 +26,8 @@ log(){ echo "$(ts) $*" | tee -a "$LOG_FILE"; }
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
   log "❌ 已有 patch 实例在运行，退出。"; exit 1
 fi
-trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT INT TERM
+cleanup_lock(){ rmdir "$LOCK_DIR" 2>/dev/null || true; }
+trap 'cleanup_lock' EXIT INT TERM
 
 # ---------- 补丁存在性 ----------
 if [[ ! -f "$PATCH_FILE" ]]; then
@@ -142,7 +148,7 @@ log "👤 提交作者：${AUTHOR_LINE:-(空)}"
 # ---------- 严格 EOF ----------
 LAST_MEANINGFUL_LINE="$(awk 'NF{last=$0} END{print last}' "$PATCH_FILE")"
 if [ "${LAST_MEANINGFUL_LINE:-}" != "${EOF_MARK:-}" ]; then
-  log "❌ 严格 EOF 校验失败：期望『${EOF_MARK:-}』，实得『${LAST_MEANINGFUL_LINE:-}』"; exit 1
+  log "❌ 严格 EOF 校验失败：期望『${EOF_MARK:-}』，实得『${LAST_MEANINGFUL_LINE:-}'}"; exit 1
 fi
 
 # ---------- 解析补丁 ----------
@@ -205,25 +211,46 @@ while IFS= read -r raw || [[ -n "$raw" ]]; do
   if [[ $in_block -eq 1 || $in_block -eq 2 || $in_block -eq 3 ]]; then printf '%s\n' "$line" >>"$cur_tmp"; fi
 done < "$PATCH_FILE"
 
-if [[ $in_block -ne 0 ]]; then log "❌ 补丁块未正常结束。"; exit 1; fi
+if [[ $in_block -ne 0 ]]; then log "❌ 补丁块未正常结束。"; false; fi
 
 log "📦 统计：file=${#files_todo[@]} delete=${#deletes_todo[@]} mv=${#moves_from[@]} block=${#blocks_path[@]} diff=${#diffs_tmp[@]}"
 
-# ---------- 执行（进入仓库 + 开启事务） ----------
+# ---------- 执行（进入仓库 + 干净策略 + 开启事务） ----------
 cd "$REPO"
 
-# 事务：要求工作区干净（可用 REQUIRE_CLEAN=0 放宽）
-if [[ "${REQUIRE_CLEAN:-1}" == "1" ]] && { ! git diff --quiet || ! git diff --cached --quiet; }; then
-  log "❌ 工作区不干净；为保证事务性已中止（设 REQUIRE_CLEAN=0 可忽略）"; exit 1
-fi
+# 干净策略
+case "${REQUIRE_CLEAN:-1}" in
+  auto)
+    log "ℹ️ 自动清理：git reset --hard && git clean -fd"
+    git reset --hard >/dev/null
+    git clean -fd >/dev/null
+    ;;
+  1|true|yes)
+    if { ! git diff --quiet || ! git diff --cached --quiet; }; then
+      log "❌ 工作区不干净；为保证事务性已中止（REQUIRE_CLEAN=auto 可自动清理，=0 忽略）"
+      false
+    fi
+    ;;
+  0|false|no)
+    : ;; # 忽略
+  *)
+    log "⚠️ 未知 REQUIRE_CLEAN='${REQUIRE_CLEAN:-}'，按默认 1 处理"
+    if { ! git diff --quiet || ! git diff --cached --quiet; }; then
+      log "❌ 工作区不干净；为保证事务性已中止"; false
+    fi
+    ;;
+esac
+
+# 事务起点 + 回滚器（ERR & EXIT 兜底）
 START_HEAD="$(git rev-parse --verify HEAD 2>/dev/null || true)"
-TX_ACTIVE=1
+TX_DONE=0
 rollback(){
   git reset --hard "${START_HEAD:-HEAD}" >/dev/null 2>&1 || true
   git clean -fd >/dev/null 2>&1 || true
   log "↩️ 已回滚到 ${START_HEAD:-HEAD}"
 }
 trap 'log "❌ 出错，回滚中…"; rollback' ERR
+trap 'rc=$?; if [[ $rc -ne 0 && ${TX_DONE:-0} -eq 0 ]]; then log "⚠️ 非零退出($rc)，执行兜底回滚…"; rollback; fi' EXIT
 
 # mv
 for (( i=0; i<${#moves_from[@]:-0}; i++ )); do
@@ -367,11 +394,11 @@ PY
 
 for (( i=0; i<${#blocks_path[@]:-0}; i++ )); do
   p="${blocks_path[$i]-}"; a="${blocks_anchor[$i]-}"; m="${blocks_mode[$i]-}"
-  tmp="${blocks_tmp[$i]-}"; idx="${blocks_index[$i]-}"   # @index 直接 1-based
+  tmp="${blocks_tmp[$i]-}"; idx="${blocks_index[$i]-}"   # @index 1-based
   [[ -z "${p:-}" || -z "${a:-}" || -z "${tmp:-}" || -z "${idx:-}" ]] && continue
   ensure_canonical_in_repo "$p"; mkdir -p "$(dirname "$p")"
   if apply_block "$p" "$a" "$m" "$tmp" "$idx"; then git add "$p"; log "✅ 区块：$p #$a ($m @index=$idx)"
-  else log "❌ 区块失败：$p #$a ($m @index=$idx)"; exit 1; fi
+  else log "❌ 区块失败：$p #$a ($m @index=$idx)"; false; fi
 done
 for t in "${blocks_tmp[@]:-}"; do rm -f "$t" 2>/dev/null || true; done
 
@@ -394,22 +421,27 @@ apply_diff(){
   if [[ "$reverse" == "1" || "$mode" == "reverse" ]]; then args+=(--reverse); fi
   local workdir="$REPO"; [[ -n "$subpath" ]] && workdir="$REPO/$subpath"
   if ! git -C "$workdir" apply --check "${args[@]}" "$tmp" >/dev/null 2>&1; then
-    log "❌ git apply --check 失败：$opts"; git -C "$workdir" apply --check "${args[@]}" "$tmp" || true; return 1
+    log "❌ git apply --check 失败：$opts"
+    git -C "$workdir" apply --check "${args[@]}" "$tmp" || true
+    return 1
   fi
-  git -C "$workdir" apply "${args[@]}" "$tmp"; log "✅ 已应用 diff（$opts）"; return 0
+  git -C "$workdir" apply "${args[@]}" "$tmp"
+  log "✅ 已应用 diff（$opts）"
+  return 0
 }
 for (( i=0; i<${#diffs_tmp[@]:-0}; i++ )); do
   dt="${diffs_tmp[$i]-}"; dopts="${diffs_opts[$i]-}"
   [[ -z "${dt:-}" ]] && continue
-  if ! apply_diff "$dt" "$dopts"; then log "❌ diff 应用失败：$dopts"; exit 1; fi
+  if ! apply_diff "$dt" "$dopts"; then log "❌ diff 应用失败：$dopts"; false; fi
 done
 for t in "${diffs_tmp[@]:-}"; do rm -f "$t" 2>/dev/null || true; done
 
 # ---------- 提交 & 推送（事务收尾） ----------
 if git diff --cached --quiet; then
   log "ℹ️ 无改动需要提交。"
-  TX_ACTIVE=0; trap - ERR
-  log "================ patch.sh end ================"; exit 0
+  TX_DONE=1
+  log "================ patch.sh end ================"
+  exit 0
 fi
 
 if [[ -n "${AUTHOR_LINE:-}" ]]; then git commit --author "$AUTHOR_LINE" -m "${COMMIT_MSG:-chore: apply patch}" >/dev/null
@@ -420,16 +452,15 @@ if [[ "${PUSH:-1}" == "1" ]]; then
   log "🚀 正在推送…"
   if git push origin HEAD >/dev/null; then
     log "🚀 推送完成"
-    TX_ACTIVE=0; trap - ERR
+    TX_DONE=1
   else
     log "❌ 推送失败；开始回滚"
-    rollback; TX_ACTIVE=0; trap - ERR; exit 1
+    rollback; TX_DONE=1; exit 1
   fi
 else
   log "ℹ️ 已禁用推送（PUSH=0）"
-  TX_ACTIVE=0; trap - ERR
+  TX_DONE=1
 fi
 
 log "================ patch.sh end ================"
-
 
