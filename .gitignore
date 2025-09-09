@@ -10,3 +10,10 @@ patch/.patch.lock/
 patch/.repo
 patch/文本.txt
 
+
+# XGIT:BEGIN XGIT_IGNORE
+# macOS Finder
+.DS_Store
+**/.DS_Store
+
+
