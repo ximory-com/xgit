@@ -1,38 +1,12 @@
-# XGit runtime & local patch system (ignored)
-patch/
-tools/
-web/
-
-# Patch runtime artifacts
-patch/patch.log
-patch/patch-watch.log
-patch/.patch.lock/
-patch/.repo
-patch/文本.txt
-
-
 # XGIT:BEGIN XGIT_IGNORE
 # macOS Finder
 .DS_Store
 **/.DS_Store
-# XGIT:END XGIT_IGNORE
 
-# XGIT:BEGIN XGIT_IGNORE
+# Node
 node_modules/
-
-# XGIT:END XGIT_IGNORE
-
-# XGIT:BEGIN XGIT_IGNORE
-tmp/
-
-# XGIT:END XGIT_IGNORE
-
-# XGIT:BEGIN XGIT_IGNORE
-# macOS Finder
-.DS_Store
-**/.DS_Store
 
 # Logs
 *.log
-
 # XGIT:END XGIT_IGNORE
+
