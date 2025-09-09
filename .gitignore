@@ -1,31 +1,12 @@
-# macOS
-.DS_Store
+# XGit runtime & local patch system (ignored)
+patch/
+tools/
+web/
 
-# Node.js dependencies
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+# Patch runtime artifacts
+patch/patch.log
+patch/patch-watch.log
+patch/.patch.lock/
+patch/.repo
+patch/文本.txt
 
-# Build output
-dist/
-build/
-out/
-
-# Logs
-logs/
-*.log
-*.log.*
-
-# Environment files
-.env
-.env.local
-.env.*.local
-
-# VSCode settings
-.vscode/
-.history/
-
-# Temporary
-.tmp/
-.cache
