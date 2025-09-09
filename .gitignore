@@ -15,15 +15,4 @@ patch/文本.txt
 # macOS Finder
 .DS_Store
 **/.DS_Store
-
-
-
-# XGIT:BEGIN XGIT_IGNORE
-
-
-# XGIT:BEGIN XGIT_IGNORE
-# macOS Finder
-.DS_Store
-**/.DS_Store
-
 # XGIT:END XGIT_IGNORE
