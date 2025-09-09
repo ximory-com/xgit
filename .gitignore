@@ -10,3 +10,23 @@ node_modules/
 *.log
 # XGIT:END XGIT_IGNORE
 
+
+# XGIT:BEGIN XGIT_IGNORE
+node_modules/
+
+# XGIT:END XGIT_IGNORE
+
+# XGIT:BEGIN XGIT_IGNORE
+tmp/
+
+# XGIT:END XGIT_IGNORE
+
+# XGIT:BEGIN XGIT_IGNORE
+# macOS Finder
+.DS_Store
+**/.DS_Store
+
+# Logs
+*.log
+
+# XGIT:END XGIT_IGNORE
