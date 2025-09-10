@@ -1,82 +1,65 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
 
-// XGIT:BEGIN APPLY
-// 说明：一次性应用补丁（先 delete，后 file/block；失败中止）
+// 说明：applyOnce 执行一次补丁的完整事务：清理→写文件/区块→提交→推送。
+// 注意：此文件仅修复调用点以匹配多文件拆分后的导出符号：DualLogger.Log / Shell / WriteFile。
 func applyOnce(logger *DualLogger, repo string, p *Patch) {
-	logger.log("▶ 开始执行补丁：%s", time.Now().Format("2006-01-02 15:04:05"))
-	logger.log("ℹ️ 仓库：%s", repo)
+	logger.Log("▶ 开始执行补丁：%s", time.Now().Format("2006-01-02 15:04:05"))
+	logger.Log("ℹ️ 仓库：%s", repo)
 
 	// 清理（auto）
-	logger.log("ℹ️ 自动清理工作区：reset --hard / clean -fd")
-	_, _, _ = shell("git", "-C", repo, "reset", "--hard")
-	_, _, _ = shell("git", "-C", repo, "clean", "-fd")
+	logger.Log("ℹ️ 自动清理工作区：reset --hard / clean -fd")
+	_, _, _ = Shell("git", "-C", repo, "reset", "--hard")
+	_, _, _ = Shell("git", "-C", repo, "clean", "-fd")
 
-	// 1) 删除
-	for _, d := range p.Deletes {
-		rel := strings.TrimSpace(d.Path)
-		if rel == "" {
-			continue
-		}
-		abs := filepath.Join(repo, rel)
-		// 先尝试 git rm（若已跟踪会直接进入暂存区）
-		if _, _, err := shell("git", "-C", repo, "rm", "-rf", "--", rel); err != nil {
-			// 不在索引里：物理删除
-			_ = os.RemoveAll(abs)
-		}
-		logger.log("🗑️ 删除：%s", rel)
-	}
-
-	// 2) file 写入
+	// 写文件（写入后会统一加入暂存）
 	for _, f := range p.Files {
-		if err := writeFile(repo, f.Path, f.Content, logger.log); err != nil {
-			logger.log("❌ 写入失败：%s (%v)", f.Path, err)
+		if err := WriteFile(repo, f.Path, f.Content, logger.Log); err != nil {
+			logger.Log("❌ 写入失败：%s (%v)", f.Path, err)
 			return
 		}
 	}
 
-	// 3) block 应用
+	// 区块（命中锚区后会自动加入暂存）
 	for _, b := range p.Blocks {
-		if err := applyBlock(repo, b, logger.log); err != nil {
-			logger.log("❌ 区块失败：%s #%s (%v)", b.Path, b.Anchor, err)
+		if err := applyBlock(repo, b, logger.Log); err != nil {
+			logger.Log("❌ 区块失败：%s #%s (%v)", b.Path, b.Anchor, err)
 			return
 		}
 	}
 
-	// 是否有改动
-	names, _, _ := shell("git", "-C", repo, "diff", "--cached", "--name-only")
+	// 若无改动则直接结束
+	names, _, _ := Shell("git", "-C", repo, "diff", "--cached", "--name-only")
 	if strings.TrimSpace(names) == "" {
-		logger.log("ℹ️ 无改动需要提交。")
-		logger.log("✅ 本次补丁完成")
+		logger.Log("ℹ️ 无改动需要提交。")
+		logger.Log("✅ 本次补丁完成")
 		return
 	}
 
 	// 提交 & 推送
-	commit := strings.TrimSpace(p.Commit)
-	if commit == "" {
+	commit := p.Commit
+	if strings.TrimSpace(commit) == "" {
 		commit = "chore: apply patch"
 	}
 	author := strings.TrimSpace(p.Author)
 	if author == "" {
 		author = "XGit Bot <bot@xgit.local>"
 	}
-	logger.log("ℹ️ 提交说明：%s", commit)
-	logger.log("ℹ️ 提交作者：%s", author)
-	_, _, _ = shell("git", "-C", repo, "commit", "--author", author, "-m", commit)
-	logger.log("✅ 已提交：%s", commit)
+	logger.Log("ℹ️ 提交说明：%s", commit)
+	logger.Log("ℹ️ 提交作者：%s", author)
 
-	logger.log("🚀 正在推送（origin HEAD）…")
-	if _, er, err := shell("git", "-C", repo, "push", "origin", "HEAD"); err != nil {
-		logger.log("❌ 推送失败：%s", er)
+	_, _, _ = Shell("git", "-C", repo, "commit", "--author", author, "-m", commit)
+	logger.Log("✅ 已提交：%s", commit)
+
+	logger.Log("🚀 正在推送（origin HEAD）…")
+	if _, er, err := Shell("git", "-C", repo, "push", "origin", "HEAD"); err != nil {
+		logger.Log("❌ 推送失败：%s", er)
 	} else {
-		logger.log("🚀 推送完成")
+		logger.Log("🚀 推送完成")
 	}
-	logger.log("✅ 本次补丁完成")
+	logger.Log("✅ 本次补丁完成")
 }
-// XGIT:END APPLY
