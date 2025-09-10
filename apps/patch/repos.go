@@ -1,7 +1,8 @@
+// XGIT:BEGIN PACKAGE
 package main
+// XGIT:END PACKAGE
 
 // XGIT:BEGIN IMPORTS
-// 说明：仓库映射 .repos 解析（支持 default = name）
 import (
 	"bufio"
 	"os"
@@ -11,8 +12,8 @@ import (
 // XGIT:END IMPORTS
 
 // XGIT:BEGIN REPOS
-// 说明：读取 patchDir/.repos -> (name->absPath, defaultName)
-func LoadRepos(patchDir string) (map[string]string, string) {
+// 解析 .repos（支持：`name /abs/path` 与 `default = name`）
+func loadRepos(patchDir string) (map[string]string, string) {
 	m := map[string]string{}
 	def := ""
 	f, err := os.Open(filepath.Join(patchDir, ".repos"))
@@ -37,7 +38,6 @@ func LoadRepos(patchDir string) (map[string]string, string) {
 			}
 			continue
 		}
-		// name /abs/path（或带空格的路径）
 		sp := strings.Fields(line)
 		if len(sp) >= 2 {
 			name := sp[0]
@@ -48,13 +48,3 @@ func LoadRepos(patchDir string) (map[string]string, string) {
 	return m, def
 }
 // XGIT:END REPOS
-// XGIT:BEGIN REPOS_HEADER
-package main
-
-import (
-	"bufio"
-	"os"
-	"path/filepath"
-	"strings"
-)
-// XGIT:END REPOS_HEADER
