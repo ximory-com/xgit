@@ -1,19 +1,21 @@
-// XGIT:BEGIN PACKAGE
 package main
-// XGIT:END PACKAGE
+
+// XGIT:BEGIN FILE-HEADER
+// pidutil.go — 进程 PID 文件以及存活检测
+// XGIT:END FILE-HEADER
 
 // XGIT:BEGIN IMPORTS
 import (
-	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
-	"syscall"
+	"strings"
 )
 // XGIT:END IMPORTS
 
-// XGIT:BEGIN PIDUTIL
+// XGIT:BEGIN PID-IMPL
 func writePID(path string, pid int) error {
-	return os.WriteFile(path, []byte(fmt.Sprintf("%d", pid)), 0644)
+	return os.WriteFile(path, []byte(strconv.Itoa(pid)), 0644)
 }
 
 func readPID(path string) (int, bool) {
@@ -21,21 +23,28 @@ func readPID(path string) (int, bool) {
 	if err != nil {
 		return 0, false
 	}
-	s := string(b)
-	pid, err := strconv.Atoi(strings.TrimSpace(s))
-	if err != nil {
+	s := strings.TrimSpace(string(b))
+	n, err := strconv.Atoi(s)
+	if err != nil || n <= 0 {
 		return 0, false
 	}
-	return pid, true
+	return n, true
 }
 
 func processAlive(pid int) bool {
-	// 在 Unix/macOS 上，向进程发送 0 信号，可用于探测是否存在
-	err := syscall.Kill(pid, 0)
-	return err == nil
+	p := exec.Command("ps", "-p", strconv.Itoa(pid))
+	if err := p.Run(); err != nil {
+		return false
+	}
+	return true
 }
 
 func killProcess(pid int) error {
-	return syscall.Kill(pid, syscall.SIGTERM)
+	// 尝试优雅停止
+	if err := exec.Command("kill", "-TERM", strconv.Itoa(pid)).Run(); err != nil {
+		// 强制
+		_ = exec.Command("kill", "-KILL", strconv.Itoa(pid)).Run()
+	}
+	return nil
 }
-// XGIT:END PIDUTIL
+// XGIT:END PID-IMPL
