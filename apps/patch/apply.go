@@ -1,12 +1,13 @@
 // Package patch: one-shot apply (clean -> files -> blocks -> commit/push)
 // XGIT:BEGIN APPLY_HEADER
-package patch
+package main
 
 import (
 	"path/filepath"
 	"strings"
 	"time"
 )
+
 // XGIT:END APPLY_HEADER
 
 // XGIT:BEGIN APPLY

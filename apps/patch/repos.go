@@ -48,3 +48,13 @@ func LoadRepos(patchDir string) (map[string]string, string) {
 	return m, def
 }
 // XGIT:END REPOS
+// XGIT:BEGIN REPOS_HEADER
+package main
+
+import (
+	"bufio"
+	"os"
+	"path/filepath"
+	"strings"
+)
+// XGIT:END REPOS_HEADER

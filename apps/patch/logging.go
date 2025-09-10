@@ -37,3 +37,13 @@ func (d *DualLogger) Log(format string, a ...any) {
 	fmt.Fprintf(d.w, "%s %s\n", ts, fmt.Sprintf(format, a...))
 }
 // XGIT:END LOGGING
+// XGIT:BEGIN LOGGING_HEADER
+package main
+
+import (
+	"io"
+	"os"
+	"path/filepath"
+	"time"
+)
+// XGIT:END LOGGING_HEADER

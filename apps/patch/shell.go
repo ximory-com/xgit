@@ -24,3 +24,13 @@ func Shell(parts ...string) (string, string, error) {
 	return strings.TrimRight(out.String(), "\n"), strings.TrimRight(er.String(), "\n"), err
 }
 // XGIT:END SHELL
+// XGIT:BEGIN SHELL_HEADER
+package main
+
+import (
+	"bytes"
+	"errors"
+	"os/exec"
+	"strings"
+)
+// XGIT:END SHELL_HEADER

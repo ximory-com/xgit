@@ -1,6 +1,6 @@
 // Package patch: patch parser (commit/author + file/block)
 // XGIT:BEGIN PARSER_HEADER
-package patch
+package main
 
 import (
 	"bufio"
@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 )
+
 // XGIT:END PARSER_HEADER
 
 // XGIT:BEGIN PARSER_TYPES

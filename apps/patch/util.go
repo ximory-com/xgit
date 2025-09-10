@@ -1,12 +1,13 @@
 // Package patch: utility helpers (path normalize, stage, write)
 // XGIT:BEGIN UTIL_HEADER
-package patch
+package main
 
 import (
 	"os"
 	"path/filepath"
 	"strings"
 )
+
 // XGIT:END UTIL_HEADER
 
 // XGIT:BEGIN NORM_PATH

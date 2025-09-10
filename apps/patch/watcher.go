@@ -57,3 +57,15 @@ func lastLine(r io.Reader) string {
 	return last
 }
 // XGIT:END WATCH
+// XGIT:BEGIN WATCHER_HEADER
+package main
+
+import (
+	"bufio"
+	"crypto/md5"
+	"encoding/hex"
+	"io"
+	"os"
+	"time"
+)
+// XGIT:END WATCHER_HEADER

@@ -1,6 +1,6 @@
 // Package patch: block apply (anchors + 4 modes)
 // XGIT:BEGIN BLOCK_HEADER
-package patch
+package main
 
 import (
 	"bytes"
@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 )
+
 // XGIT:END BLOCK_HEADER
 
 // XGIT:BEGIN BLOCK_APPLY
