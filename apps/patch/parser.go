@@ -1,7 +1,5 @@
 package main
 
-// XGIT:BEGIN IMPORTS
-// 说明：补丁解析（commitmsg/author + file/block），严格 EOF
 import (
 	"bufio"
 	"bytes"
@@ -10,20 +8,22 @@ import (
 	"regexp"
 	"strings"
 )
-// XGIT:END IMPORTS
 
 // XGIT:BEGIN PARSER
-// 说明：解析补丁文本为结构化对象
+// 说明：解析补丁头(commitmsg/author)与块(file/block/delete)
 type Patch struct {
-	Commit string
-	Author string
-	Files  []FileChunk
-	Blocks []BlockChunk
+	Commit  string
+	Author  string
+	Files   []FileChunk
+	Blocks  []BlockChunk
+	Deletes []DeleteChunk
 }
+
 type FileChunk struct {
 	Path    string
 	Content string
 }
+
 type BlockChunk struct {
 	Path   string
 	Anchor string
@@ -32,12 +32,17 @@ type BlockChunk struct {
 	Body   string
 }
 
+type DeleteChunk struct {
+	Path string
+}
+
 var (
-	rFile  = regexp.MustCompile(`^=== file:\s*(.+?)\s*===$`)
-	rBlock = regexp.MustCompile(`^=== block:\s*([^#\s]+)#([A-Za-z0-9_-]+)(?:@index=(\d+))?(?:\s+mode=(replace|append|prepend|append_once))?\s*===$`)
+	rFile   = regexp.MustCompile(`^=== file:\s*(.+?)\s*===$`)
+	rBlock  = regexp.MustCompile(`^=== block:\s*([^#\s]+)#([A-Za-z0-9_-]+)(?:@index=(\d+))?(?:\s+mode=(replace|append|prepend|append_once))?\s*===$`)
+	rDelete = regexp.MustCompile(`^=== delete:\s*(.+?)\s*===$`)
 )
 
-func ParsePatch(patchFile, eof string) (*Patch, error) {
+func parsePatch(patchFile, eof string) (*Patch, error) {
 	b, err := os.ReadFile(patchFile)
 	if err != nil {
 		return nil, err
@@ -71,8 +76,8 @@ func ParsePatch(patchFile, eof string) (*Patch, error) {
 		}
 	}
 
-	// 块抓取
-	in := 0 // 0 无；1 file；2 block
+	// 块解析
+	in := 0 // 0 无；1 file；2 block；4 delete(消耗一个 end)
 	curPath := ""
 	curBody := &strings.Builder{}
 	curBlk := BlockChunk{Index: 1, Mode: "replace"}
@@ -83,14 +88,14 @@ func ParsePatch(patchFile, eof string) (*Patch, error) {
 		if in == 0 {
 			if m := rFile.FindStringSubmatch(line); len(m) > 0 {
 				in = 1
-				curPath = NormPath(m[1])
+				curPath = normPath(m[1])
 				curBody.Reset()
 				continue
 			}
 			if m := rBlock.FindStringSubmatch(line); len(m) > 0 {
 				in = 2
 				curBlk = BlockChunk{
-					Path:   NormPath(m[1]),
+					Path:   normPath(m[1]),
 					Anchor: m[2],
 					Index:  1,
 					Mode:   "replace",
@@ -104,24 +109,34 @@ func ParsePatch(patchFile, eof string) (*Patch, error) {
 				curBody.Reset()
 				continue
 			}
+			if m := rDelete.FindStringSubmatch(line); len(m) > 0 {
+				in = 4
+				p.Deletes = append(p.Deletes, DeleteChunk{Path: normPath(m[1])})
+				continue
+			}
 			continue
 		}
 
-		if in != 0 && line == "=== end ===" {
-			if in == 1 {
+		if line == "=== end ===" {
+			switch in {
+			case 1:
 				p.Files = append(p.Files, FileChunk{Path: curPath, Content: curBody.String()})
-			} else {
+			case 2:
 				curBlk.Body = curBody.String()
 				p.Blocks = append(p.Blocks, curBlk)
+			case 4:
+				// delete：无正文，end 仅用于结构对齐
 			}
-			in, curPath = 0, ""
+			in = 0
+			curPath = ""
 			curBody.Reset()
 			continue
 		}
+
 		if line == eof {
 			break
 		}
-		if in != 0 {
+		if in == 1 || in == 2 {
 			curBody.WriteString(line)
 			curBody.WriteByte('\n')
 		}
