@@ -1,40 +1,32 @@
-package main
+// Package patch: utility helpers (path normalize, stage, write)
+// XGIT:BEGIN UTIL_HEADER
+package patch
 
-// XGIT:BEGIN IMPORTS
-// 说明：工具函数（路径规范 + 进程/锁等）
 import (
-	"bufio"
-	"crypto/md5"
-	"encoding/hex"
-	"fmt"
-	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
-
-// XGIT:END IMPORTS
+// XGIT:END UTIL_HEADER
 
 // XGIT:BEGIN NORM_PATH
-// 说明：*.md 或无扩展 => 文件名大写；其余 => 文件名小写；扩展小写；去首尾空白
-func Lower(s string) string { return strings.ToLower(s) }
-func Upper(s string) string { return strings.ToUpper(s) }
+// NormPath: 标准化路径（*.md 或无扩展 => 文件名大写；其他 => 文件名小写；扩展一律小写）
 func NormPath(p string) string {
 	p = strings.TrimSpace(p)
 	p = strings.TrimPrefix(p, "./")
 	p = strings.ReplaceAll(p, "//", "/")
 	dir := filepath.Dir(p)
 	base := filepath.Base(p)
+
 	name, ext := base, ""
 	if i := strings.LastIndex(base, "."); i >= 0 {
 		name, ext = base[:i], base[i+1:]
 	}
-	extL := Lower(ext)
+	extL := strings.ToLower(ext)
 	if ext == "" || extL == "md" {
-		name = Upper(name)
+		name = strings.ToUpper(name)
 	} else {
-		name = Lower(name)
+		name = strings.ToLower(name)
 	}
 	if extL != "" {
 		base = name + "." + extL
@@ -48,51 +40,41 @@ func NormPath(p string) string {
 }
 // XGIT:END NORM_PATH
 
-// XGIT:BEGIN PROC_LOCK
-// 说明：进程/锁（修正 fmtSscanf 的占位实现）
-func writePID(lock string) error {
-	if _, err := os.Stat(lock); err == nil {
-		// 已存在则认为忙
-		return io.EOF
+// XGIT:BEGIN WRITE_AND_STAGE
+// WriteFile: 写入文件并加入暂存；统一 LF 和末尾换行
+func WriteFile(repo string, rel string, content string, logf func(string, ...any)) error {
+	abs := filepath.Join(repo, rel)
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		return err
 	}
-	return os.WriteFile(lock, []byte(strconv.Itoa(os.Getpid())), 0644)
-}
-func readPID(lock string) int {
-	b, err := os.ReadFile(lock)
-	if err != nil {
-		return 0
+	content = strings.ReplaceAll(content, "\r", "")
+	if !strings.HasSuffix(content, "\n") {
+		content += "\n"
 	}
-	s := strings.TrimSpace(string(b))
-	var pid int
-	_, _ = fmtSscanf(s, "%d", &pid)
-	return pid
+	if err := os.WriteFile(abs, []byte(content), 0o644); err != nil {
+		return err
+	}
+	if logf != nil {
+		logf("✅ 写入文件：%s", rel)
+	}
+	Stage(repo, rel, logf)
+	return nil
 }
-func processAlive(pid int) bool {
-	return pid > 0
-}
-func fmtSscanf(s, f string, a ...any) (int, error) { return fmt.Sscanf(s, f, a...) }
 
-// XGIT:END PROC_LOCK
-
-// XGIT:BEGIN IO_HELPERS
-// 说明：文件 md5 / 读取最后一行（非空）
-func FileMD5(path string) (string, error) {
-	all, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
+// Stage: 将路径加入暂存
+func Stage(repo, rel string, logf func(string, ...any)) {
+	rel = strings.TrimSpace(rel)
+	if rel == "" {
+		return
 	}
-	h := md5.Sum(all)
-	return hex.EncodeToString(h[:]), nil
-}
-func LastMeaningfulLine(r io.Reader) string {
-	sc := bufio.NewScanner(r)
-	last := ""
-	for sc.Scan() {
-		t := strings.TrimRight(sc.Text(), "\r")
-		if strings.TrimSpace(t) != "" {
-			last = t
+	if _, _, err := Shell("git", "-C", repo, "add", "--", rel); err != nil {
+		if logf != nil {
+			logf("⚠️ 自动加入暂存失败：%s", rel)
+		}
+	} else {
+		if logf != nil {
+			logf("🧮 已加入暂存：%s", rel)
 		}
 	}
-	return last
 }
-// XGIT:END IO_HELPERS
+// XGIT:END WRITE_AND_STAGE

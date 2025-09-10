@@ -1,4 +1,6 @@
-package main
+// Package patch: patch parser (commit/author + file/block)
+// XGIT:BEGIN PARSER_HEADER
+package patch
 
 import (
 	"bufio"
@@ -8,15 +10,15 @@ import (
 	"regexp"
 	"strings"
 )
+// XGIT:END PARSER_HEADER
 
-// XGIT:BEGIN PARSER
-// 说明：解析补丁头(commitmsg/author)与块(file/block/delete)
+// XGIT:BEGIN PARSER_TYPES
 type Patch struct {
 	Commit  string
 	Author  string
 	Files   []FileChunk
 	Blocks  []BlockChunk
-	Deletes []DeleteChunk
+	Deletes []string
 }
 
 type FileChunk struct {
@@ -31,18 +33,19 @@ type BlockChunk struct {
 	Index  int
 	Body   string
 }
+// XGIT:END PARSER_TYPES
 
-type DeleteChunk struct {
-	Path string
-}
-
+// XGIT:BEGIN PARSER_REGEX
 var (
-	rFile   = regexp.MustCompile(`^=== file:\s*(.+?)\s*===$`)
-	rBlock  = regexp.MustCompile(`^=== block:\s*([^#\s]+)#([A-Za-z0-9_-]+)(?:@index=(\d+))?(?:\s+mode=(replace|append|prepend|append_once))?\s*===$`)
-	rDelete = regexp.MustCompile(`^=== delete:\s*(.+?)\s*===$`)
+	rFile  = regexp.MustCompile(`^=== file:\s*(.+?)\s*===$`)
+	rBlock = regexp.MustCompile(`^=== block:\s*([^#\s]+)#([A-Za-z0-9_-]+)(?:@index=(\d+))?(?:\s+mode=(replace|append|prepend|append_once))?\s*===$`)
+	rDel   = regexp.MustCompile(`^=== delete:\s*(.+?)\s*===$`)
 )
+// XGIT:END PARSER_REGEX
 
-func parsePatch(patchFile, eof string) (*Patch, error) {
+// XGIT:BEGIN PARSE_PATCH
+// ParsePatch: 解析补丁并做严格 EOF 校验
+func ParsePatch(patchFile, eof string) (*Patch, error) {
 	b, err := os.ReadFile(patchFile)
 	if err != nil {
 		return nil, err
@@ -63,7 +66,7 @@ func parsePatch(patchFile, eof string) (*Patch, error) {
 	p := &Patch{}
 	lines := strings.Split(string(b), "\n")
 
-	// 头字段
+	// 头字段（直到第一个 === 开始）
 	for i := 0; i < len(lines); i++ {
 		line := strings.TrimRight(lines[i], "\r")
 		if strings.HasPrefix(line, "commitmsg:") && p.Commit == "" {
@@ -71,13 +74,12 @@ func parsePatch(patchFile, eof string) (*Patch, error) {
 		} else if strings.HasPrefix(line, "author:") && p.Author == "" {
 			p.Author = strings.TrimSpace(strings.TrimPrefix(line, "author:"))
 		}
-		if strings.HasPrefix(line, "=== ") {
+		if strings.HasPrefix(line, "===") {
 			break
 		}
 	}
 
-	// 块解析
-	in := 0 // 0 无；1 file；2 block；4 delete(消耗一个 end)
+	in := 0 // 0 无；1 file；2 block
 	curPath := ""
 	curBody := &strings.Builder{}
 	curBlk := BlockChunk{Index: 1, Mode: "replace"}
@@ -88,14 +90,14 @@ func parsePatch(patchFile, eof string) (*Patch, error) {
 		if in == 0 {
 			if m := rFile.FindStringSubmatch(line); len(m) > 0 {
 				in = 1
-				curPath = normPath(m[1])
+				curPath = NormPath(m[1])
 				curBody.Reset()
 				continue
 			}
 			if m := rBlock.FindStringSubmatch(line); len(m) > 0 {
 				in = 2
 				curBlk = BlockChunk{
-					Path:   normPath(m[1]),
+					Path:   NormPath(m[1]),
 					Anchor: m[2],
 					Index:  1,
 					Mode:   "replace",
@@ -109,23 +111,19 @@ func parsePatch(patchFile, eof string) (*Patch, error) {
 				curBody.Reset()
 				continue
 			}
-			if m := rDelete.FindStringSubmatch(line); len(m) > 0 {
-				in = 4
-				p.Deletes = append(p.Deletes, DeleteChunk{Path: normPath(m[1])})
+			if m := rDel.FindStringSubmatch(line); len(m) > 0 {
+				p.Deletes = append(p.Deletes, NormPath(m[1]))
 				continue
 			}
 			continue
 		}
 
-		if line == "=== end ===" {
-			switch in {
-			case 1:
+		if in != 0 && line == "=== end ===" {
+			if in == 1 {
 				p.Files = append(p.Files, FileChunk{Path: curPath, Content: curBody.String()})
-			case 2:
+			} else {
 				curBlk.Body = curBody.String()
 				p.Blocks = append(p.Blocks, curBlk)
-			case 4:
-				// delete：无正文，end 仅用于结构对齐
 			}
 			in = 0
 			curPath = ""
@@ -136,11 +134,11 @@ func parsePatch(patchFile, eof string) (*Patch, error) {
 		if line == eof {
 			break
 		}
-		if in == 1 || in == 2 {
+		if in != 0 {
 			curBody.WriteString(line)
 			curBody.WriteByte('\n')
 		}
 	}
 	return p, nil
 }
-// XGIT:END PARSER
+// XGIT:END PARSE_PATCH
