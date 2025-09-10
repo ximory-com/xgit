@@ -8,8 +8,10 @@ import (
 	"encoding/hex"
 	"io"
 	"os"
+	"strings"
 	"time"
 )
+
 // XGIT:END IMPORTS
 
 // XGIT:BEGIN WATCH

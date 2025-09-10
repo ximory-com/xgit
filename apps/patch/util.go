@@ -3,13 +3,17 @@ package main
 // XGIT:BEGIN IMPORTS
 // 说明：工具函数（路径规范 + 进程/锁等）
 import (
+	"bufio"
 	"crypto/md5"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
+
 // XGIT:END IMPORTS
 
 // XGIT:BEGIN NORM_PATH
@@ -45,13 +49,13 @@ func NormPath(p string) string {
 // XGIT:END NORM_PATH
 
 // XGIT:BEGIN PROC_LOCK
-// 说明：进程/锁
+// 说明：进程/锁（修正 fmtSscanf 的占位实现）
 func writePID(lock string) error {
 	if _, err := os.Stat(lock); err == nil {
 		// 已存在则认为忙
 		return io.EOF
 	}
-	return os.WriteFile(lock, []byte(os.GetpidString()), 0644)
+	return os.WriteFile(lock, []byte(strconv.Itoa(os.Getpid())), 0644)
 }
 func readPID(lock string) int {
 	b, err := os.ReadFile(lock)
@@ -64,10 +68,10 @@ func readPID(lock string) int {
 	return pid
 }
 func processAlive(pid int) bool {
-	// 最简单可移植的探测：发 0 信号不具备；这里只判断>0
 	return pid > 0
 }
 func fmtSscanf(s, f string, a ...any) (int, error) { return fmt.Sscanf(s, f, a...) }
+
 // XGIT:END PROC_LOCK
 
 // XGIT:BEGIN IO_HELPERS
