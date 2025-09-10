@@ -1,11 +1,16 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-# 仓库根目录
-REPO_DIR="$(cd "$(dirname "$0")/../.." && pwd -P)"
-# 仓库外的 patch 目录
-PATCH_DIR="$(cd "$REPO_DIR/../patch" && pwd -P)"
+# XGIT:BEGIN BUILD_CONF
+# 说明：将构建产物输出到仓库同级的 patch 目录（Git 仓库之外）
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
+PATCH_DIR="$(cd "$REPO_ROOT/.." && pwd -P)/patch"
+OUT="$PATCH_DIR/xgit_patchd"
+# XGIT:END BUILD_CONF
 
-echo "Building -> $PATCH_DIR/xgit_patchd"
-go build -o "$PATCH_DIR/xgit_patchd" "$REPO_DIR/apps/patch/xgit_patchd.go"
-
+mkdir -p "$PATCH_DIR"
+echo "Building -> $OUT"
+cd "$REPO_ROOT/apps/patch"
+go build -o "$OUT" ./...
+echo "Done."
