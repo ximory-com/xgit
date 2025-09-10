@@ -1,25 +1,24 @@
-// Package patch: patch parser (commit/author + file/block)
-// XGIT:BEGIN PARSER_HEADER
+// XGIT:BEGIN PACKAGE
 package main
+// XGIT:END PACKAGE
 
+// XGIT:BEGIN IMPORTS
 import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 )
+// XGIT:END IMPORTS
 
-// XGIT:END PARSER_HEADER
-
-// XGIT:BEGIN PARSER_TYPES
+// XGIT:BEGIN PARSER
+// 解析得到的结构体（与其它文件解耦，避免重名冲突）
 type Patch struct {
-	Commit  string
-	Author  string
-	Files   []FileChunk
-	Blocks  []BlockChunk
-	Deletes []string
+	Commit string
+	Author string
+	Files  []FileChunk
+	Blocks []BlockChunk
 }
 
 type FileChunk struct {
@@ -34,71 +33,69 @@ type BlockChunk struct {
 	Index  int
 	Body   string
 }
-// XGIT:END PARSER_TYPES
 
-// XGIT:BEGIN PARSER_REGEX
 var (
 	rFile  = regexp.MustCompile(`^=== file:\s*(.+?)\s*===$`)
 	rBlock = regexp.MustCompile(`^=== block:\s*([^#\s]+)#([A-Za-z0-9_-]+)(?:@index=(\d+))?(?:\s+mode=(replace|append|prepend|append_once))?\s*===$`)
-	rDel   = regexp.MustCompile(`^=== delete:\s*(.+?)\s*===$`)
 )
-// XGIT:END PARSER_REGEX
 
-// XGIT:BEGIN PARSE_PATCH
-// ParsePatch: 解析补丁并做严格 EOF 校验
-func ParsePatch(patchFile, eof string) (*Patch, error) {
-	b, err := os.ReadFile(patchFile)
-	if err != nil {
-		return nil, err
-	}
-	// 严格 EOF（最后一个非空行）
-	lastMeaningful := ""
-	sc := bufio.NewScanner(bytes.NewReader(b))
+// ParsePatch 解析补丁文本（严格 EOF 已由 watcher 判定）
+func ParsePatch(raw []byte, eof string) (*Patch, error) {
+	// 最后一条非空行校验（双保险）
+	last := ""
+	sc := bufio.NewScanner(bytes.NewReader(raw))
 	for sc.Scan() {
-		s := strings.TrimRight(sc.Text(), "\r")
-		if strings.TrimSpace(s) != "" {
-			lastMeaningful = s
+		line := strings.TrimRight(sc.Text(), "\r")
+		if strings.TrimSpace(line) != "" {
+			last = line
 		}
 	}
-	if lastMeaningful != eof {
-		return nil, fmt.Errorf("严格 EOF 校验失败：期望『%s』，实得『%s』", eof, lastMeaningful)
+	if last != eof {
+		return nil, fmt.Errorf("严格 EOF 校验失败：期望『%s』，实得『%s』", eof, last)
 	}
 
+	lines := strings.Split(strings.ReplaceAll(string(raw), "\r", ""), "\n")
 	p := &Patch{}
-	lines := strings.Split(string(b), "\n")
 
-	// 头字段（直到第一个 === 开始）
+	// 读取头
 	for i := 0; i < len(lines); i++ {
-		line := strings.TrimRight(lines[i], "\r")
-		if strings.HasPrefix(line, "commitmsg:") && p.Commit == "" {
-			p.Commit = strings.TrimSpace(strings.TrimPrefix(line, "commitmsg:"))
-		} else if strings.HasPrefix(line, "author:") && p.Author == "" {
-			p.Author = strings.TrimSpace(strings.TrimPrefix(line, "author:"))
+		s := strings.TrimSpace(lines[i])
+		if s == "" {
+			continue
 		}
-		if strings.HasPrefix(line, "===") {
+		if strings.HasPrefix(s, "commitmsg:") && p.Commit == "" {
+			p.Commit = strings.TrimSpace(strings.TrimPrefix(s, "commitmsg:"))
+			continue
+		}
+		if strings.HasPrefix(s, "author:") && p.Author == "" {
+			p.Author = strings.TrimSpace(strings.TrimPrefix(s, "author:"))
+			continue
+		}
+		if strings.HasPrefix(s, "===") {
 			break
 		}
 	}
 
-	in := 0 // 0 无；1 file；2 block
+	// 读取块
+	in := 0 // 0 none; 1 file; 2 block
 	curPath := ""
-	curBody := &strings.Builder{}
+	var curBody strings.Builder
 	curBlk := BlockChunk{Index: 1, Mode: "replace"}
 
 	for i := 0; i < len(lines); i++ {
-		line := strings.TrimRight(lines[i], "\r")
+		line := lines[i]
 
 		if in == 0 {
 			if m := rFile.FindStringSubmatch(line); len(m) > 0 {
 				in = 1
-				curPath = NormPath(m[1])
+				curPath = normPathLocal(m[1])
 				curBody.Reset()
 				continue
 			}
 			if m := rBlock.FindStringSubmatch(line); len(m) > 0 {
 				in = 2
 				curBlk = BlockChunk{
-					Path:   NormPath(m[1]),
+					Path:   normPathLocal(m[1]),
 					Anchor: m[2],
 					Index:  1,
 					Mode:   "replace",
@@ -112,14 +109,10 @@ func ParsePatch(patchFile, eof string) (*Patch, error) {
 				curBody.Reset()
 				continue
 			}
-			if m := rDel.FindStringSubmatch(line); len(m) > 0 {
-				p.Deletes = append(p.Deletes, NormPath(m[1]))
-				continue
-			}
 			continue
 		}
 
-		if in != 0 && line == "=== end ===" {
+		if line == "=== end ===" {
 			if in == 1 {
 				p.Files = append(p.Files, FileChunk{Path: curPath, Content: curBody.String()})
 			} else {
@@ -135,11 +128,56 @@ func ParsePatch(patchFile, eof string) (*Patch, error) {
 		if line == eof {
 			break
 		}
-		if in != 0 {
-			curBody.WriteString(line)
-			curBody.WriteByte('\n')
-		}
+
+		curBody.WriteString(line)
+		curBody.WriteByte('\n')
 	}
+
 	return p, nil
 }
-// XGIT:END PARSE_PATCH
+
+// 本地路径规范，不与其它 util 同名，避免重定义
+func normPathLocal(p string) string {
+	p = strings.TrimSpace(p)
+	p = strings.TrimPrefix(p, "./")
+	p = strings.ReplaceAll(p, "//", "/")
+	dir, base := splitDirBase(p)
+	name, ext := splitNameExt(base)
+	extL := strings.ToLower(ext)
+	if ext == "" || extL == "md" {
+		name = strings.ToUpper(name)
+	} else {
+		name = strings.ToLower(name)
+	}
+	base2 := name
+	if extL != "" {
+		base2 = name + "." + extL
+	}
+	if dir == "" || dir == "." {
+		return base2
+	}
+	if strings.HasSuffix(dir, "/") {
+		return dir + base2
+	}
+	return dir + "/" + base2
+}
+
+func splitDirBase(p string) (string, string) {
+	i := strings.LastIndex(p, "/")
+	if i < 0 {
+		return ".", p
+	}
+	if i == 0 {
+		return "/", p[1:]
+	}
+	return p[:i], p[i+1:]
+}
+
+func splitNameExt(b string) (string, string) {
+	i := strings.LastIndex(b, ".")
+	if i < 0 {
+		return b, ""
+	}
+	return b[:i], b[i+1:]
+}
+// XGIT:END PARSER

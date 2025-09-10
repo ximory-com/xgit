@@ -1,16 +1,17 @@
-// Package patch: one-shot apply (clean -> files -> blocks -> commit/push)
-// XGIT:BEGIN APPLY_HEADER
+// XGIT:BEGIN PACKAGE
 package main
+// XGIT:END PACKAGE
 
+// XGIT:BEGIN IMPORTS
 import (
-	"path/filepath"
 	"strings"
 	"time"
 )
-
-// XGIT:END APPLY_HEADER
+// XGIT:END IMPORTS
 
 // XGIT:BEGIN APPLY
+// applyOnce：一次事务（清理 -> 写 file -> 应用 block -> 提交/推送）
+// 依赖外部已存在：WriteFile(repo, rel, content, logger.Log)、ApplyBlock(repo, blk, logger.Log)、Shell()、DualLogger.Log()
 func applyOnce(logger *DualLogger, repo string, p *Patch) {
 	logger.Log("▶ 开始执行补丁：%s", time.Now().Format("2006-01-02 15:04:05"))
 	logger.Log("ℹ️ 仓库：%s", repo)
@@ -19,15 +20,6 @@ func applyOnce(logger *DualLogger, repo string, p *Patch) {
 	logger.Log("ℹ️ 自动清理工作区：reset --hard / clean -fd")
 	_, _, _ = Shell("git", "-C", repo, "reset", "--hard")
 	_, _, _ = Shell("git", "-C", repo, "clean", "-fd")
-
-	// 删除（优先 git rm，不在索引里则物理删）
-	for _, rel := range p.Deletes {
-		abs := filepath.Join(repo, rel)
-		if _, _, err := Shell("git", "-C", repo, "rm", "-rf", "--", rel); err != nil {
-			_ = RemoveAll(abs)
-		}
-		logger.Log("🗑️ 删除：%s", rel)
-	}
 
 	// 写文件
 	for _, f := range p.Files {
@@ -45,7 +37,7 @@ func applyOnce(logger *DualLogger, repo string, p *Patch) {
 		}
 	}
 
-	// 无改动直接返回
+	// 是否有改动
 	names, _, _ := Shell("git", "-C", repo, "diff", "--cached", "--name-only")
 	if strings.TrimSpace(names) == "" {
 		logger.Log("ℹ️ 无改动需要提交。")
