@@ -11,6 +11,8 @@ import (
 	"os"
 	"time"
 )
+import "strings"
+
 // XGIT:END IMPORTS
 
 // XGIT:BEGIN WATCHER
