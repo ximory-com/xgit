@@ -1,19 +1,17 @@
-// XGIT:BEGIN PACKAGE
-package main
-// XGIT:END PACKAGE
+package patch
 
-// XGIT:BEGIN IMPORTS
+// 读取补丁目录下 .repos 映射，并解析补丁头里的 repo: 字段。
+// 导出：LoadRepos, HeaderRepoName
+
 import (
 	"bufio"
 	"os"
 	"path/filepath"
 	"strings"
 )
-// XGIT:END IMPORTS
 
-// XGIT:BEGIN REPOS
-// 解析 .repos（支持：`name /abs/path` 与 `default = name`）
-func loadRepos(patchDir string) (map[string]string, string) {
+// LoadRepos 解析 patchDir/.repos，返回 (name->path 映射, defaultName)
+func LoadRepos(patchDir string) (map[string]string, string) {
 	m := map[string]string{}
 	def := ""
 	f, err := os.Open(filepath.Join(patchDir, ".repos"))
@@ -21,12 +19,14 @@ func loadRepos(patchDir string) (map[string]string, string) {
 		return m, def
 	}
 	defer f.Close()
+
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+		// 兼容 "default = name" 以及 "name /abs/path"
 		if strings.Contains(line, "=") {
 			k, v, _ := strings.Cut(line, "=")
 			k = strings.TrimSpace(k)
@@ -38,13 +38,35 @@ func loadRepos(patchDir string) (map[string]string, string) {
 			}
 			continue
 		}
-		sp := strings.Fields(line)
-		if len(sp) >= 2 {
-			name := sp[0]
-			path := strings.Join(sp[1:], " ")
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			name := parts[0]
+			path := strings.Join(parts[1:], " ")
 			m[name] = path
 		}
 	}
 	return m, def
 }
-// XGIT:END REPOS
+
+// HeaderRepoName 扫描补丁文件头部，读取 repo: <name|/abs/path>
+func HeaderRepoName(patchFile string) string {
+	f, err := os.Open(patchFile)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "repo:") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "repo:"))
+		}
+		if strings.HasPrefix(line, "===") {
+			break
+		}
+	}
+	return ""
+}

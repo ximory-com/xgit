@@ -1,43 +1,34 @@
-// XGIT:BEGIN PACKAGE
-package main
-// XGIT:END PACKAGE
+package patch
 
-// XGIT:BEGIN IMPORTS
+// 只实现 file 覆盖提交与推送（不依赖 block）。
+// 导出：ApplyOnce
+
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
-// XGIT:END IMPORTS
 
-// XGIT:BEGIN APPLY
-// applyOnce：一次事务（清理 -> 写 file -> 应用 block -> 提交/推送）
-// 依赖外部已存在：WriteFile(repo, rel, content, logger.Log)、ApplyBlock(repo, blk, logger.Log)、Shell()、DualLogger.Log()
-func applyOnce(logger *DualLogger, repo string, p *Patch) {
+// ApplyOnce 在 repo 内应用一次补丁（仅 file），自动 reset/clean、add、commit、push。
+func ApplyOnce(logger *DualLogger, repo string, p *Patch) {
 	logger.Log("▶ 开始执行补丁：%s", time.Now().Format("2006-01-02 15:04:05"))
 	logger.Log("ℹ️ 仓库：%s", repo)
 
-	// 清理（auto）
+	// 自动清理（等价 REQUIRE_CLEAN=auto）
 	logger.Log("ℹ️ 自动清理工作区：reset --hard / clean -fd")
 	_, _, _ = Shell("git", "-C", repo, "reset", "--hard")
 	_, _, _ = Shell("git", "-C", repo, "clean", "-fd")
 
-	// 写文件
-	for _, f := range p.Files {
-		if err := WriteFile(repo, f.Path, f.Content, logger.Log); err != nil {
-			logger.Log("❌ 写入失败：%s (%v)", f.Path, err)
+	// 写入文件（覆盖）
+	for _, fc := range p.Files {
+		if err := applyWriteFile(repo, fc.Path, fc.Content, logger); err != nil {
+			logger.Log("❌ 写入失败：%s (%v)", fc.Path, err)
 			return
 		}
 	}
 
-	// 区块
-	for _, b := range p.Blocks {
-		if err := ApplyBlock(repo, b, logger.Log); err != nil {
-			logger.Log("❌ 区块失败：%s #%s (%v)", b.Path, b.Anchor, err)
-			return
-		}
-	}
-
-	// 是否有改动
+	// 若没有任何改动（看缓存区）
 	names, _, _ := Shell("git", "-C", repo, "diff", "--cached", "--name-only")
 	if strings.TrimSpace(names) == "" {
 		logger.Log("ℹ️ 无改动需要提交。")
@@ -67,4 +58,35 @@ func applyOnce(logger *DualLogger, repo string, p *Patch) {
 	}
 	logger.Log("✅ 本次补丁完成")
 }
-// XGIT:END APPLY
+
+// —— 内部辅助（避免与其他文件重名冲突，前缀 apply*） ——
+
+func applyStage(repo, rel string, logger *DualLogger) {
+	rel = strings.TrimSpace(rel)
+	if rel == "" {
+		return
+	}
+	if _, _, err := Shell("git", "-C", repo, "add", "--", rel); err != nil {
+		logger.Log("⚠️ 自动加入暂存失败：%s", rel)
+	} else {
+		logger.Log("🧮 已加入暂存：%s", rel)
+	}
+}
+
+func applyWriteFile(repo, rel, content string, logger *DualLogger) error {
+	abs := filepath.Join(repo, rel)
+	if err := os.MkdirAll(filepath.Dir(abs), 0755); err != nil {
+		return err
+	}
+	// 统一 LF；保证末尾换行
+	content = strings.ReplaceAll(content, "\r", "")
+	if !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	if err := os.WriteFile(abs, []byte(content), 0644); err != nil {
+		return err
+	}
+	logger.Log("✅ 写入文件：%s", rel)
+	applyStage(repo, rel, logger)
+	return nil
+}
