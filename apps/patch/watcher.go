@@ -1,4 +1,4 @@
-package patch
+package main
 
 // 文件稳定检测 + 严格 EOF 去抖
 // 导出：NewWatcher, (*Watcher).StableAndEOF

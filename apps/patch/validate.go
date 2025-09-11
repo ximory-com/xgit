@@ -1,4 +1,4 @@
-package patch
+package main
 
 // 体检器（文件级）
 // - 文本/二进制判定（启发式）

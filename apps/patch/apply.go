@@ -1,4 +1,4 @@
-package patch
+package main
 
 // 只实现 file 覆盖提交与推送（不依赖 block）。
 // 导出：ApplyOnce

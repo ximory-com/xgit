@@ -1,4 +1,4 @@
-package patch
+package main
 
 // 读取补丁目录下 .repos 映射，并解析补丁头里的 repo: 字段。
 // 导出：LoadRepos, HeaderRepoName
