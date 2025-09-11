@@ -1,4 +1,4 @@
-package patch
+package main
 
 import (
 	"bufio"

@@ -4,12 +4,9 @@ package main
 // 导出：NewWatcher, (*Watcher).StableAndEOF
 
 import (
-	"bufio"
 	"crypto/md5"
 	"encoding/hex"
-	"io"
 	"os"
-	"strings"
 	"time"
 )
 
@@ -39,15 +36,14 @@ func (w *Watcher) StableAndEOF() (ok bool, size int, hash8 string) {
 	}
 
 	// 严格 EOF
-	f, _ := os.Open(w.PatchFile)
-	defer f.Close()
-	last := lastMeaningfulLine(f)
-	if last != w.EOFMark {
-		if !w.eofWarned {
-			w.logger.Log("⏳ 等待严格 EOF 标记“%s”", w.EOFMark)
-			w.eofWarned = true
-		}
-		return false, 0, ""
+	data, _ := os.ReadFile(w.PatchFile)
+	line := lastMeaningfulLine(data) // 用 parser.go 里的实现
+	if line != w.EOFMark {
+    	if !w.eofWarned {
+        	w.logger.Log("⏳ 等待严格 EOF 标记“%s”", w.EOFMark)
+        	w.eofWarned = true
+    	}
+    	return false, 0, ""
 	}
 	w.eofWarned = false
 
@@ -56,14 +52,4 @@ func (w *Watcher) StableAndEOF() (ok bool, size int, hash8 string) {
 	return true, int(size1), hex.EncodeToString(sum[:])[:8]
 }
 
-func lastMeaningfulLine(r io.Reader) string {
-	sc := bufio.NewScanner(r)
-	last := ""
-	for sc.Scan() {
-		s := strings.TrimRight(sc.Text(), "\r")
-		if strings.TrimSpace(s) != "" {
-			last = s
-		}
-	}
-	return last
-}
+

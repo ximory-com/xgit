@@ -78,14 +78,8 @@ func main() {
 			if ok && h8 != "" && h8 != lastHash {
 				logger.Log("📦 补丁稳定（size=%d md5=%s）→ 准备执行", size, h8)
 
-				data, err := os.ReadFile(patchFile)
-				if err != nil {
-					logger.Log("❌ 读取补丁失败：%v", err)
-					lastHash = h8
-					time.Sleep(700 * time.Millisecond)
-					continue
-				}
-				p, err := ParsePatch(data, eofMark)
+				eof := w.EOFMark
+				pt, err := ParsePatch(patchFile, eof)
 				if err != nil {
 					logger.Log("❌ 解析失败：%v", err)
 					lastHash = h8
@@ -111,7 +105,7 @@ func main() {
 					continue
 				}
 
-				ApplyOnce(logger, repoPath, p)
+				ApplyOnce(logger, repoPath, pt)
 				lastHash = h8
 			}
 			time.Sleep(250 * time.Millisecond)
