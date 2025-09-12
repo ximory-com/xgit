@@ -1,85 +1,252 @@
-/*
-XGIT FileOps: file.replace
-说明：在单文件范围内做替换（支持纯文本/正则、大小写敏感、行号范围）
-*/
-// XGIT:BEGIN GO:PACKAGE
+// patch/fileops/replace.go
+//
+// XGIT FileOps: file.replace (Enhanced)
+// 说明：在单文件范围内执行文本替换（支持正则/字面量、大小写开关、行号范围、次数限制、EOL 保持、原子写入、保留权限与 mtime）。
+// 用法（dispatcher 侧示例）：
+//   logf := func(format string, a ...any) { if logger != nil { logger.Log(format, a...) } }
+//   err := fileops.FileReplace(repo, rel,
+//       pattern, repl,                 // find / repl
+//       isRegex, icase,                // regex / ci(不区分大小写)
+//       lineFrom, lineTo,              // 行范围（1-based，闭区间；0 表示不限）
+//       count, ensureEOFNewline,       // 次数上限、末尾换行
+//       multiline,                     // 正则 (?m)
+//       logf,
+//   )
 package fileops
-// XGIT:END GO:PACKAGE
 
-// XGIT:BEGIN GO:IMPORTS
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
-// XGIT:END GO:IMPORTS
 
-// XGIT:BEGIN GO:FUNC_FILE_REPLACE
-// FileReplace 文本替换 —— 协议: file.replace
-// 如果 useRegex=true 则 treat 'find' 为正则；否则为字面量
-// 行范围 [lineStart, lineEnd]，<=0 表示不限制
-func FileReplace(repo, rel, find, repl string, caseSensitive, useRegex bool, lineStart, lineEnd int, logger DualLogger) error {
+// FileReplace 在文本文件中按选项执行替换。
+// 参数：
+//  repo: 仓库根
+//  rel : 相对路径
+//  find: 查找（字面或正则）
+//  repl: 替换文本（来自补丁指令体）
+//  useRegex: 是否使用正则
+//  icase:    不区分大小写（字面量：手动实现；正则：通过 (?i)）
+//  lineFrom/lineTo: 行范围（1-based，闭区间；0=不限）
+//  count:    替换次数上限（<=0 表示全部）
+//  ensureEOFNewline: 替换后是否保证末尾有换行
+//  multiline: 正则多行模式（(?m)）
+//  logf:     日志函数，可为 nil
+func FileReplace(
+	repo, rel, find, repl string,
+	useRegex bool,
+	icase bool,
+	lineFrom, lineTo int,
+	count int,
+	ensureEOFNewline bool,
+	multiline bool,
+	logf func(string, ...any),
+) error {
 	abs := filepath.Join(repo, rel)
-	b, err := os.ReadFile(abs)
-	if err != nil { return err }
-	lines := strings.Split(normalizeLF(string(b)), "\n")
-	L := len(lines)
 
-	start := 1; if lineStart > 0 { start = lineStart }
-	end   := L; if lineEnd   > 0 && lineEnd <= L { end = lineEnd }
-	if start < 1 { start = 1 }
-	if end < start { end = start }
+	// 读入文件
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		logfSafe(logf, "❌ file.replace 读取失败：%s (%v)", rel, err)
+		return err
+	}
 
+	// 保存原权限与 mtime
+	fi, _ := os.Stat(abs)
+	mode := os.FileMode(0o644)
+	var mtime time.Time
+	if fi != nil {
+		mode = fi.Mode()
+		mtime = fi.ModTime()
+	}
+
+	// 识别并记录原 EOL（CRLF/LF）
+	isCRLF := bytes.Contains(data, []byte("\r\n"))
+	text := normalizeLF(string(data))
+
+	// 计算行范围
+	lines := strings.Split(text, "\n")
+	total := len(lines)
+	start := 1
+	if lineFrom > 0 {
+		start = lineFrom
+	}
+	end := total
+	if lineTo > 0 && lineTo <= total {
+		end = lineTo
+	}
+	if start < 1 {
+		start = 1
+	}
+	if end < start {
+		end = start
+	}
 	segment := strings.Join(lines[start-1:end], "\n")
-	var out string
+
+	// 执行替换
+	replaced := 0
+	var segOut string
 
 	if useRegex {
-		re := (*regexp.Regexp)(nil)
-		if caseSensitive {
-			re = regexp.MustCompile(find)
-		} else {
-			re = regexp.MustCompile("(?i)" + find)
+		flags := ""
+		if icase {
+			flags += "(?i)"
 		}
-		out = re.ReplaceAllString(segment, repl)
-	} else {
-		if caseSensitive {
-			out = strings.ReplaceAll(segment, find, repl)
+		if multiline {
+			flags += "(?m)"
+		}
+		flags += "(?s)" // 让 '.' 跨行
+		re, err := regexp.Compile(flags + find)
+		if err != nil {
+			logfSafe(logf, "❌ file.replace 正则编译失败：%s (%v)", find, err)
+			return err
+		}
+		if count > 0 {
+			left := count
+			segOut = re.ReplaceAllStringFunc(segment, func(m string) string {
+				if left <= 0 {
+					return m
+				}
+				replaced++
+				left--
+				return re.ReplaceAllString(m, repl)
+			})
 		} else {
-			// 不区分大小写：逐行处理
-			out = replaceAllCaseInsensitive(segment, find, repl)
+			segOut = re.ReplaceAllString(segment, repl)
+			replaced = len(re.FindAllStringIndex(segment, -1))
+		}
+	} else {
+		if icase {
+			segOut, replaced = replaceCaseInsensitive(segment, find, repl, count)
+		} else {
+			segOut, replaced = replaceCaseSensitive(segment, find, repl, count)
 		}
 	}
 
-	lines[start-1] = "" // 重写段
-	copySlice := append([]string{}, lines[:start-1]...)
-	copySlice = append(copySlice, strings.Split(out, "\n")...)
-	if end < L { copySlice = append(copySlice, lines[end:]...) }
+	if replaced == 0 {
+		logfSafe(logf, "⚠️ file.replace 无匹配：%s（范围 %d-%d）", rel, start, end)
+		return nil
+	}
 
-	newS := strings.Join(copySlice, "\n")
-	if len(newS) > 0 && newS[len(newS)-1] != '\n' { newS += "\n" }
-	if err := os.WriteFile(abs, []byte(newS), 0o644); err != nil { return err }
+	// 拼回全文
+	var builder strings.Builder
+	if start > 1 {
+		builder.WriteString(strings.Join(lines[:start-1], "\n"))
+		builder.WriteString("\n")
+	}
+	builder.WriteString(segOut)
+	if end < total {
+		builder.WriteString("\n")
+		builder.WriteString(strings.Join(lines[end:], "\n"))
+	}
+	result := builder.String()
 
-	if logger != nil { logger.Log("🪄 file.replace 完成：%s (range=%d..%d, regex=%v, ci=%v)", rel, start, end, useRegex, !caseSensitive) }
+	// 末尾换行保证
+	if ensureEOFNewline && !strings.HasSuffix(result, "\n") {
+		result += "\n"
+	}
+
+	// 恢复为原 EOL
+	if isCRLF {
+		result = toCRLF(result)
+	}
+
+	// 原子写入：临时文件 → fsync → rename
+	dir := filepath.Dir(abs)
+	tmpf, err := os.CreateTemp(dir, ".xgit_replace_*")
+	if err != nil {
+		logfSafe(logf, "❌ file.replace 临时文件失败：%v", err)
+		return err
+	}
+	tmp := tmpf.Name()
+	defer os.Remove(tmp)
+
+	if _, err := io.WriteString(tmpf, result); err != nil {
+		_ = tmpf.Close()
+		return err
+	}
+	if err := tmpf.Sync(); err != nil {
+		_ = tmpf.Close()
+		return err
+	}
+	if err := tmpf.Close(); err != nil {
+		return err
+	}
+	_ = os.Chmod(tmp, mode)
+	if err := os.Rename(tmp, abs); err != nil {
+		logfSafe(logf, "❌ file.replace 覆盖失败：%v", err)
+		return err
+	}
+	if !mtime.IsZero() {
+		_ = os.Chtimes(abs, time.Now(), mtime)
+	}
+
+	if count > 0 {
+		logfSafe(logf, "✏️ file.replace 完成：%s（命中 %d，最多 %d，范围 %d-%d）", rel, replaced, count, start, end)
+	} else {
+		logfSafe(logf, "✏️ file.replace 完成：%s（命中 %d，范围 %d-%d）", rel, replaced, start, end)
+	}
 	return nil
 }
 
-func replaceAllCaseInsensitive(s, find, repl string) string {
-	if find == "" { return s }
-	lf := strings.ToLower(find)
-	var b strings.Builder
-	i := 0
-	ls := strings.ToLower(s)
-	for {
-		idx := strings.Index(ls[i:], lf)
+// ===== helpers =====
+
+func logfSafe(logf func(string, ...any), format string, a ...any) {
+	if logf != nil {
+		logf(format, a...)
+	}
+}
+
+// 区分大小写；count<=0 表示全部
+func replaceCaseSensitive(s, find, repl string, count int) (string, int) {
+	if find == "" {
+		return s, 0
+	}
+	if count <= 0 {
+		n := strings.Count(s, find)
+		return strings.ReplaceAll(s, find, repl), n
+	}
+	out := s
+	repld := 0
+	for repld < count {
+		idx := strings.Index(out, find)
 		if idx < 0 {
-			b.WriteString(s[i:])
 			break
 		}
-		b.WriteString(s[i : i+idx])
-		b.WriteString(repl)
-		i += idx + len(find)
+		out = out[:idx] + repl + out[idx+len(find):]
+		repld++
 	}
-	return b.String()
+	return out, repld
 }
-// XGIT:END GO:FUNC_FILE_REPLACE
+
+// 不区分大小写；count<=0 表示全部
+func replaceCaseInsensitive(s, find, repl string, count int) (string, int) {
+	if find == "" {
+		return s, 0
+	}
+	var b strings.Builder
+	ls := strings.ToLower(s)
+	lf := strings.ToLower(find)
+	i, repld := 0, 0
+	for {
+		if count > 0 && repld >= count {
+			break
+		}
+		j := strings.Index(ls[i:], lf)
+		if j < 0 {
+			break
+		}
+		// 原文切片按原 s 写回
+		b.WriteString(s[i : i+j])
+		b.WriteString(repl)
+		i += j + len(find)
+		repld++
+	}
+	b.WriteString(s[i:])
+	return b.String(), repld
+}

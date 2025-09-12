@@ -49,28 +49,35 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 
 	case "file.prepend":
 		return fileops.FilePrepend(repo, op.Path, []byte(op.Body), logger)
-
-	case "file.replace":
-		// 支持：
-		//  - pattern: 正则/字面（取决于 mode）
-		//  - repl:    替换文本
-		//  - mode:    "regex" | "literal"（默认 literal）
-		//  - icase:   不区分大小写（默认 false）
-		//  - multiline: 多行模式（默认 false）
-		//  - line_from / line_to: 作用的行范围（默认 0 表示不限制）
+	case "file.replace": {
+		// 必填
 		pattern := argStr(op.Args, "pattern", "")
-		repl := argStr(op.Args, "repl", "")
 		if pattern == "" {
-			return errors.New("file.replace: 缺少 pattern")
+			return errors.New("file.replace: missing pattern")
 		}
-		mode := strings.ToLower(strings.TrimSpace(argStr(op.Args, "mode", "literal")))
-		isRegex := (mode == "regex" || mode == "re")
-		icase := argBool(op.Args, "icase", false)
-		lineFrom := argInt(op.Args, "line_from", 0)
-		lineTo := argInt(op.Args, "line_to", 0)
+		// 指令体 = 替换后的文本（允许空串）
+		repl := op.Body // ← 关键：从补丁指令体取替换文本
+		// 兼容你们协议键名
+		isRegex  := argBool(op.Args, "regex", false)   // regex=true|false
+		icase    := argBool(op.Args, "ci", false)      // ci=true 表示不区分大小写
+		lineFrom := argInt (op.Args, "start_line", 0)  // 0 表示不限
+		lineTo   := argInt (op.Args, "end_line",   0)
+		// 可选开关（有就取，没有就默认）
+		count    := argInt (op.Args, "count", 0)       // <=0 表示全部
+		ensureNL := argBool(op.Args, "ensure_eof_nl", false)
+		multiline:= argBool(op.Args, "multiline", false)
 
-		return fileops.FileReplace(repo, op.Path, pattern, repl, isRegex, icase, lineFrom, lineTo, logger)
-
+		logf := func(format string, a ...any) {
+			if logger != nil { logger.Log(format, a...) }
+		}
+		return fileops.FileReplace(
+			repo, op.Path, pattern, repl,
+			isRegex, icase,
+			lineFrom, lineTo,
+			count, ensureNL, multiline,
+			logf,
+		)
+	}		
 	case "file.delete":
 		return fileops.FileDelete(repo, op.Path, logger)
 
