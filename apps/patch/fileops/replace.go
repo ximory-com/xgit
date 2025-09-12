@@ -1,17 +1,17 @@
-// patch/fileops/replace.go
-//
-// XGIT FileOps: file.replace (Enhanced)
-// 说明：在单文件范围内执行文本替换（支持正则/字面量、大小写开关、行号范围、次数限制、EOL 保持、原子写入、保留权限与 mtime）。
-// 用法（dispatcher 侧示例）：
-//   logf := func(format string, a ...any) { if logger != nil { logger.Log(format, a...) } }
-//   err := fileops.FileReplace(repo, rel,
-//       pattern, repl,                 // find / repl
-//       isRegex, icase,                // regex / ci(不区分大小写)
-//       lineFrom, lineTo,              // 行范围（1-based，闭区间；0 表示不限）
-//       count, ensureEOFNewline,       // 次数上限、末尾换行
-//       multiline,                     // 正则 (?m)
-//       logf,
-//   )
+ patch/fileops/replace.go
+
+ XGIT FileOps: file.replace (Enhanced)
+ 说明：在单文件范围内执行文本替换（支持正则/字面量、大小写开关、行号范围、次数限制、EOL 保持、原子写入、保留权限与 mtime）。
+ 用法（dispatcher 侧示例）：
+   logf := func(format string, a ...any) { if logger != nil { logger.Log(format, a...) } }
+   err := fileops.FileReplace(repo, rel,
+       pattern, repl,                  find / repl
+       isRegex, icase,                 regex / ci(不区分大小写)
+       lineFrom, lineTo,               行范围（1-based，闭区间；0 表示不限）
+       count, ensureEOFNewline,        次数上限、末尾换行
+       multiline,                      正则 (?m)
+       logf,
+   )
 package fileops
 
 import (
@@ -24,19 +24,19 @@ import (
 	"time"
 )
 
-// FileReplace 在文本文件中按选项执行替换。
-// 参数：
-//  repo: 仓库根
-//  rel : 相对路径
-//  find: 查找（字面或正则）
-//  repl: 替换文本（来自补丁指令体）
-//  useRegex: 是否使用正则
-//  icase:    不区分大小写（字面量：手动实现；正则：通过 (?i)）
-//  lineFrom/lineTo: 行范围（1-based，闭区间；0=不限）
-//  count:    替换次数上限（<=0 表示全部）
-//  ensureEOFNewline: 替换后是否保证末尾有换行
-//  multiline: 正则多行模式（(?m)）
-//  logf:     日志函数，可为 nil
+ FileReplace 在文本文件中按选项执行替换。
+ 参数：
+  repo: 仓库根
+  rel : 相对路径
+  find: 查找（字面或正则）
+  repl: 替换文本（来自补丁指令体）
+  useRegex: 是否使用正则
+  icase:    不区分大小写（字面量：手动实现；正则：通过 (?i)）
+  lineFrom/lineTo: 行范围（1-based，闭区间；0=不限）
+  count:    替换次数上限（<=0 表示全部）
+  ensureEOFNewline: 替换后是否保证末尾有换行
+  multiline: 正则多行模式（(?m)）
+  logf:     日志函数，可为 nil
 func FileReplace(
 	repo, rel, find, repl string,
 	useRegex bool,
@@ -49,27 +49,27 @@ func FileReplace(
 ) error {
 	abs := filepath.Join(repo, rel)
 
-	// 读入文件
+	 读入文件
 	data, err := os.ReadFile(abs)
 	if err != nil {
 		logfSafe(logf, "❌ file.replace 读取失败：%s (%v)", rel, err)
 		return err
 	}
 
-	// 保存原权限与 mtime
+	 保存原权限与 mtime
 	fi, _ := os.Stat(abs)
 	mode := os.FileMode(0o644)
-	var mtime time.Time
+	 mtime time.Time
 	if fi != nil {
 		mode = fi.Mode()
 		mtime = fi.ModTime()
 	}
 
-	// 识别并记录原 EOL（CRLF/LF）
+	 识别并记录原 EOL（CRLF/LF）
 	isCRLF := bytes.Contains(data, []byte("\r\n"))
 	text := normalizeLF(string(data))
 
-	// 计算行范围
+	 计算行范围
 	lines := strings.Split(text, "\n")
 	total := len(lines)
 	start := 1
@@ -88,9 +88,9 @@ func FileReplace(
 	}
 	segment := strings.Join(lines[start-1:end], "\n")
 
-	// 执行替换
+	 执行替换
 	replaced := 0
-	var segOut string
+	 segOut string
 
 	if useRegex {
 		flags := ""
@@ -100,7 +100,7 @@ func FileReplace(
 		if multiline {
 			flags += "(?m)"
 		}
-		flags += "(?s)" // 让 '.' 跨行
+		flags += "(?s)"  让 '.' 跨行
 		re, err := regexp.Compile(flags + find)
 		if err != nil {
 			logfSafe(logf, "❌ file.replace 正则编译失败：%s (%v)", find, err)
@@ -129,9 +129,9 @@ func FileReplace(
 	}
 
     if replaced == 0 {
-        // 仅确保 EOF 换行：即使没有文本替换，也要生效
+         仅确保 EOF 换行：即使没有文本替换，也要生效
         if ensureEOFNewline && !strings.HasSuffix(text, "\n") {
-            // 恢复原 EOL 风格并原子写入
+             恢复原 EOL 风格并原子写入
             out := text + "\n"
             if isCRLF { out = toCRLF(out) }
 
@@ -154,8 +154,8 @@ func FileReplace(
         return nil
     }
 
-	// 拼回全文
-	var builder strings.Builder
+	 拼回全文
+	 builder strings.Builder
 	if start > 1 {
 		builder.WriteString(strings.Join(lines[:start-1], "\n"))
 		builder.WriteString("\n")
@@ -167,17 +167,17 @@ func FileReplace(
 	}
 	result := builder.String()
 
-	// 末尾换行保证
+	 末尾换行保证
 	if ensureEOFNewline && !strings.HasSuffix(result, "\n") {
 		result += "\n"
 	}
 
-	// 恢复为原 EOL
+	 恢复为原 EOL
 	if isCRLF {
 		result = toCRLF(result)
 	}
 
-	// 原子写入：临时文件 → fsync → rename
+	 原子写入：临时文件 → fsync → rename
 	dir := filepath.Dir(abs)
 	tmpf, err := os.CreateTemp(dir, ".xgit_replace_*")
 	if err != nil {
@@ -215,7 +215,7 @@ func FileReplace(
 	return nil
 }
 
-// ===== helpers =====
+ ===== helpers =====
 
 func logfSafe(logf func(string, ...any), format string, a ...any) {
 	if logf != nil {
@@ -223,7 +223,7 @@ func logfSafe(logf func(string, ...any), format string, a ...any) {
 	}
 }
 
-// 区分大小写；count<=0 表示全部
+ 区分大小写；count<=0 表示全部
 func replaceCaseSensitive(s, find, repl string, count int) (string, int) {
 	if find == "" {
 		return s, 0
@@ -245,12 +245,12 @@ func replaceCaseSensitive(s, find, repl string, count int) (string, int) {
 	return out, repld
 }
 
-// 不区分大小写；count<=0 表示全部
+ 不区分大小写；count<=0 表示全部
 func replaceCaseInsensitive(s, find, repl string, count int) (string, int) {
 	if find == "" {
 		return s, 0
 	}
-	var b strings.Builder
+	 b strings.Builder
 	ls := strings.ToLower(s)
 	lf := strings.ToLower(find)
 	i, repld := 0, 0
@@ -262,7 +262,7 @@ func replaceCaseInsensitive(s, find, repl string, count int) (string, int) {
 		if j < 0 {
 			break
 		}
-		// 原文切片按原 s 写回
+		 原文切片按原 s 写回
 		b.WriteString(s[i : i+j])
 		b.WriteString(repl)
 		i += j + len(find)
