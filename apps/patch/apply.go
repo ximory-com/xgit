@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"xgit/apps/patch/fileops"
@@ -39,9 +40,8 @@ func argStr(m map[string]string, key, def string) string {
 
 // -------------- dispatcher：把 11 条文件指令接到 fileops --------------
 func applyOp(repo string, op *FileOp, logger *DualLogger) error {
-	switch op.Cmd { // 假设 parser 里把指令名放在 op.Cmd；若是 op.Name/Kind，自行替换字段名
+	switch op.Cmd {
 	case "file.write":
-		// 写文本/任意字节（这里按文本对待，统一 LF 在 fileops 里处理）
 		return fileops.FileWrite(repo, op.Path, []byte(op.Body), logger)
 
 	case "file.append":
@@ -49,26 +49,24 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 
 	case "file.prepend":
 		return fileops.FilePrepend(repo, op.Path, []byte(op.Body), logger)
+
 	case "file.replace": {
-		// 必填
-		pattern := argStr(op.Args, "pattern", "")
-		if pattern == "" {
+		// 允许仅 ensure_eof_nl 的场景（pattern 可为空）
+		ensureNL := argBool(op.Args, "ensure_eof_nl", false)
+		pattern  := argStr(op.Args, "pattern", "")
+		if pattern == "" && !ensureNL {
 			return errors.New("file.replace: missing pattern")
 		}
-		// 指令体 = 替换后的文本（允许空串）
-		repl := op.Body // ← 关键：从补丁指令体取替换文本
-		// 兼容你们协议键名
-		isRegex  := argBool(op.Args, "regex", false)   // regex=true|false
-		icase    := argBool(op.Args, "ci", false)      // ci=true 表示不区分大小写
-		lineFrom := argInt (op.Args, "start_line", 0)  // 0 表示不限
-		lineTo   := argInt (op.Args, "end_line",   0)
-		// 可选开关（有就取，没有就默认）
-		count    := argInt (op.Args, "count", 0)       // <=0 表示全部
-		ensureNL := argBool(op.Args, "ensure_eof_nl", false)
-		multiline:= argBool(op.Args, "multiline", false)
+		repl      := op.Body
+		isRegex   := argBool(op.Args, "regex", false)
+		icase     := argBool(op.Args, "ci", false)           // ci=true → 不区分大小写
+		lineFrom  := argInt (op.Args, "start_line", 0)       // 1-based；0 不限
+		lineTo    := argInt (op.Args, "end_line", 0)
+		count     := argInt (op.Args, "count", 0)            // <=0 全部
+		multiline := argBool(op.Args, "multiline", false)
 
 		logf := func(format string, a ...any) {
-			if logger != nil { logger.Log(format, a...) }
+			logger.Log(format, a...)
 		}
 		return fileops.FileReplace(
 			repo, op.Path, pattern, repl,
@@ -77,12 +75,12 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 			count, ensureNL, multiline,
 			logf,
 		)
-	}		
+	}
+
 	case "file.delete":
 		return fileops.FileDelete(repo, op.Path, logger)
 
 	case "file.move":
-		// 需要 op.Args["to"] 作为目标
 		to := strings.TrimSpace(op.Args["to"])
 		if to == "" {
 			return errors.New("file.move: 缺少 to")
@@ -90,12 +88,10 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 		return fileops.FileMove(repo, op.Path, to, logger)
 
 	case "file.chmod":
-		// 目前 fileops 版本期望 os.FileMode；仅支持八进制（如 644/755）
 		modeStr := strings.TrimSpace(op.Args["mode"])
 		if modeStr == "" {
 			return errors.New("file.chmod: 缺少 mode（八进制，如 644/755）")
 		}
-		// 允许带前导 0
 		u, err := strconv.ParseUint(modeStr, 8, 32)
 		if err != nil {
 			return errors.New("file.chmod: 解析 mode 失败（只支持八进制数值，例如 644/755）")
@@ -103,13 +99,11 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 		return fileops.FileChmod(repo, op.Path, os.FileMode(u), logger)
 
 	case "file.eol":
-		// style=lf|crlf，ensure_nl=bool
 		style := strings.ToLower(strings.TrimSpace(argStr(op.Args, "style", "lf")))
 		ensureNL := argBool(op.Args, "ensure_nl", true)
 		return fileops.FileEOL(repo, op.Path, style, ensureNL, logger)
 
 	case "file.image":
-		// op.Body 为 base64
 		raw := strings.TrimSpace(op.Body)
 		if raw == "" {
 			return errors.New("file.image: 缺少 base64 内容")
@@ -139,54 +133,109 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 	}
 }
 
-
-
 // XGIT:BEGIN APPLY DISPATCH
-// 将 11 条 file.* 指令全部分发到同包内实现（fileops/*.go 应为 package patch）
+// 统一把一次补丁执行包在 Git 事务里：任一指令失败 → 回滚到补丁前状态
 func ApplyOnce(logger *DualLogger, repo string, patch *Patch) {
 	log := logger.Log
 
-	// 清理工作区（保持原有行为）
-	log("ℹ️ 自动清理工作区：reset --hard / clean -fd")
-	_, _, _ = shell("git", "-C", repo, "reset", "--hard")
-	_, _, _ = shell("git", "-C", repo, "clean", "-fd")
+	// 用事务包装整个应用过程
+	_ = WithGitTxn(repo, func(format string, a ...any) { logger.Log(format, a...) }, func() error {
+		log("ℹ️ 自动清理工作区：reset --hard / clean -fd")
+		_, _, _ = shell("git", "-C", repo, "reset", "--hard")
+		_, _, _ = shell("git", "-C", repo, "clean", "-fd")
 
-
-	// 需要：import "fmt" 和 "strings"
-
-	for i, op := range patch.Ops {
-		tag := fmt.Sprintf("%s #%d", op.Cmd, i+1)
-
-		if err := applyOp(repo, op, logger); err != nil {
-			log("❌ %s 失败：%v", tag, err)
-			return
+		for i, op := range patch.Ops {
+			tag := fmt.Sprintf("%s #%d", op.Cmd, i+1)
+			if err := applyOp(repo, op, logger); err != nil {
+				log("❌ %s 失败：%v", tag, err)
+				return err // 触发事务回滚
+			}
+			log("✅ %s 成功", tag)
 		}
-		log("✅ %s 成功", tag)
-	}
 
-	// 有改动则提交
-	// 在检查是否有改动之前统一 stage 一下（包含删除等）
-	_, _, _ = shell("git", "-C", repo, "add", "-A")
-	names, _, _ := shell("git", "-C", repo, "diff", "--cached", "--name-only")
-	if strings.TrimSpace(names) == "" {
-		logger.Log("ℹ️ 无改动需要提交。")
-		logger.Log("✅ 本次补丁完成")
-		return
-	}	
+		// 统一 stage
+		_, _, _ = shell("git", "-C", repo, "add", "-A")
+		names, _, _ := shell("git", "-C", repo, "diff", "--cached", "--name-only")
+		if strings.TrimSpace(names) == "" {
+			logger.Log("ℹ️ 无改动需要提交。")
+			logger.Log("✅ 本次补丁完成")
+			return nil
+		}
 
-	commit := "chore: apply patch"
-	author := "XGit Bot <bot@xgit.local>"
-	log("ℹ️ 提交说明：%s", commit)
-	log("ℹ️ 提交作者：%s", author)
-	_, _, _ = shell("git", "-C", repo, "commit", "--author", author, "-m", commit)
-	log("✅ 已提交：%s", commit)
+		commit := "chore: apply patch"
+		author := "XGit Bot <bot@xgit.local>"
+		log("ℹ️ 提交说明：%s", commit)
+		log("ℹ️ 提交作者：%s", author)
+		_, _, _ = shell("git", "-C", repo, "commit", "--author", author, "-m", commit)
+		log("✅ 已提交：%s", commit)
 
-	log("🚀 正在推送（origin HEAD）…")
-	if _, er, err := shell("git", "-C", repo, "push", "origin", "HEAD"); err != nil {
-		log("❌ 推送失败：%s", er)
-	} else {
+		log("🚀 正在推送（origin HEAD）…")
+		if _, er, err := shell("git", "-C", repo, "push", "origin", "HEAD"); err != nil {
+			log("❌ 推送失败：%s", er)
+			return err // 触发事务回滚
+		}
 		log("🚀 推送完成")
-	}
-	log("✅ 本次补丁完成")
+		log("✅ 本次补丁完成")
+		return nil
+	})
 }
 // XGIT:END APPLY DISPATCH
+
+// ======================= 事务与 Git helpers =======================
+
+// WithGitTxn 在 repo 上开启一次 Git 事务：fn() 出错则回滚到补丁前状态。
+func WithGitTxn(repo string, logf func(string, ...any), fn func() error) error {
+	preHead, _ := gitRevParseHEAD(repo)
+	_ = gitResetHard(repo, "")
+	_ = gitCleanFD(repo)
+
+	var err error
+	defer func() {
+		if err != nil {
+			if preHead != "" {
+				_ = gitResetHard(repo, preHead)
+			} else {
+				_ = gitResetHard(repo, "")
+			}
+			_ = gitCleanFD(repo)
+			if logf != nil {
+				logf("↩️ 回滚到补丁前状态：%s", preHead)
+			}
+		}
+	}()
+
+	if e := fn(); e != nil {
+		err = e
+		return err
+	}
+	return nil
+}
+
+func runCmd(name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s %s failed: %v\n%s", name, strings.Join(args, " "), err, string(out))
+	}
+	return nil
+}
+func runCmdOut(name string, args ...string) (string, error) {
+	cmd := exec.Command(name, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%s", string(out))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+func gitRevParseHEAD(repo string) (string, error) {
+	return runCmdOut("git", "-C", repo, "rev-parse", "--verify", "HEAD")
+}
+func gitResetHard(repo, rev string) error {
+	if rev == "" {
+		return runCmd("git", "-C", repo, "reset", "--hard")
+	}
+	return runCmd("git", "-C", repo, "reset", "--hard", rev)
+}
+func gitCleanFD(repo string) error {
+	return runCmd("git", "-C", repo, "clean", "-fd")
+}
