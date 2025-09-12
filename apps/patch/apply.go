@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -53,7 +52,7 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 		return fileops.FilePrepend(repo, op.Path, []byte(op.Body), logger)
 
 	case "file.replace": {
-		// 新协议：pattern 等复杂参数从 body 参数区进入 op.Args；正文作为替换体（可为空）
+		// 新协议：复杂参数来自 body 参数区（parser 已写入 op.Args），正文作为替换体
 		pattern := argStr(op.Args, "pattern", "")
 		if pattern == "" {
 			return errors.New("file.replace: missing @pattern (body param)")
@@ -69,7 +68,7 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 		ensureNL  := argBool(op.Args, "ensure_eof_nl", false)
 		multiline := argBool(op.Args, "multiline", false)
 
-		// 新增人类友好开关
+		// 人类友好附加参数
 		mode       := strings.TrimSpace(strings.ToLower(argStr(op.Args, "mode", ""))) // "", contains_line, equals_line, contains_file, regex
 		ignoreSpc  := argBool(op.Args, "ignore_spaces", false)
 		debugNoHit := argBool(op.Args, "debug", false)
@@ -90,7 +89,7 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 		return fileops.FileDelete(repo, op.Path, logger)
 
 	case "file.move":
-		// 新协议：parser 已把正文第一行写入 op.Args["to"]
+		// 新协议：parser 将正文第一行写入 op.Args["to"]
 		to := strings.TrimSpace(op.Args["to"])
 		if to == "" {
 			return errors.New("file.move: 缺少目标路径（正文第一行）")
@@ -143,25 +142,29 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 	}
 }
 
-/********** ApplyOnce: sequential apply + commit/push (kept for CLI) **********/
+/********** ApplyOnce: transactional apply + commit/push outside txn **********/
 func ApplyOnce(logger *DualLogger, repo string, patch *Patch) {
 	log := logger.Log
+	logf := func(format string, a ...any) { if logger != nil { logger.Log(format, a...) } }
 
-	// 预清理（与事务版独立存在）
-	log("ℹ️ 自动清理工作区：reset --hard / clean -fd")
-	_, _, _ = shell("git", "-C", repo, "reset", "--hard")
-	_, _, _ = shell("git", "-C", repo, "clean", "-fd")
-
-	for i, op := range patch.Ops {
-		tag := fmt.Sprintf("%s #%d", op.Cmd, i+1)
-		if err := applyOp(repo, op, logger); err != nil {
-			log("❌ %s 失败：%v", tag, err)
-			return
+	// 1) 事务阶段：逐条执行 file.*，失败自动回滚
+	err := WithGitTxn(repo, logf, func() error {
+		for i, op := range patch.Ops {
+			tag := fmt.Sprintf("%s #%d", op.Cmd, i+1)
+			if e := applyOp(repo, op, logger); e != nil {
+				log("❌ %s 失败：%v", tag, e)
+				return e
+			}
+			log("✅ %s 成功", tag)
 		}
-		log("✅ %s 成功", tag)
+		return nil
+	})
+	if err != nil {
+		// 事务内部已回滚并输出日志
+		return
 	}
 
-	// 统一 stage 并提交
+	// 2) 成功后统一 stage/commit/push（不置于事务内）
 	_, _, _ = shell("git", "-C", repo, "add", "-A")
 	names, _, _ := shell("git", "-C", repo, "diff", "--cached", "--name-only")
 	if strings.TrimSpace(names) == "" {
@@ -186,7 +189,7 @@ func ApplyOnce(logger *DualLogger, repo string, patch *Patch) {
 	log("✅ 本次补丁完成")
 }
 
-/********** ApplyPatch: transactional apply (rolls back on error) **********/
+/********** (Deprecated) ApplyPatch: keep for legacy callers **********/
 func ApplyPatch(repo string, ops []FileOp, logger DualLogger) error {
 	logf := func(format string, a ...any) { logger.Log(format, a...) }
 	return WithGitTxn(repo, logf, func() error {
