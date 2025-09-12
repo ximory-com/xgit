@@ -12,7 +12,7 @@ import (
 	"xgit/apps/patch/fileops"
 )
 
-/********** small arg helpers **********/
+// ========== 小工具：从 map 中读取参数（带默认值） ==========
 func argBool(m map[string]string, key string, def bool) bool {
 	if v, ok := m[key]; ok {
 		switch strings.ToLower(strings.TrimSpace(v)) {
@@ -39,9 +39,11 @@ func argStr(m map[string]string, key, def string) string {
 	return def
 }
 
-/********** dispatcher for 11 file.* ops **********/
+// XGIT:BEGIN APPLY DISPATCH
+// 将 11 条 file.* 指令全部分发到同包内实现（fileops/*.go），保持日志风格一致
 func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 	switch op.Cmd {
+
 	case "file.write":
 		return fileops.FileWrite(repo, op.Path, []byte(op.Body), logger)
 
@@ -52,14 +54,14 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 		return fileops.FilePrepend(repo, op.Path, []byte(op.Body), logger)
 
 	case "file.replace": {
-		// 新协议：复杂参数来自 body 参数区（parser 已写入 op.Args），正文作为替换体
+		// 约定：复杂文本参数（pattern 等）由解析器写入 op.Args；正文作为替换体（可为空表示删除命中片段）
 		pattern := argStr(op.Args, "pattern", "")
 		if pattern == "" {
 			return errors.New("file.replace: missing @pattern (body param)")
 		}
 		repl := op.Body
 
-		// flags/range
+		// 传统选项
 		isRegex   := argBool(op.Args, "regex", false)
 		icase     := argBool(op.Args, "ci", false)
 		lineFrom  := argInt (op.Args, "start_line", 0)
@@ -68,7 +70,7 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 		ensureNL  := argBool(op.Args, "ensure_eof_nl", false)
 		multiline := argBool(op.Args, "multiline", false)
 
-		// 人类友好附加参数
+		// 人类友好附加参数（可选）
 		mode       := strings.TrimSpace(strings.ToLower(argStr(op.Args, "mode", ""))) // "", contains_line, equals_line, contains_file, regex
 		ignoreSpc  := argBool(op.Args, "ignore_spaces", false)
 		debugNoHit := argBool(op.Args, "debug", false)
@@ -89,7 +91,7 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 		return fileops.FileDelete(repo, op.Path, logger)
 
 	case "file.move":
-		// 新协议：parser 将正文第一行写入 op.Args["to"]
+		// 新协议：目标路径来自正文第一行，解析器已写入 op.Args["to"]
 		to := strings.TrimSpace(op.Args["to"])
 		if to == "" {
 			return errors.New("file.move: 缺少目标路径（正文第一行）")
@@ -141,13 +143,15 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 		return errors.New("未知指令: " + op.Cmd)
 	}
 }
+// XGIT:END APPLY DISPATCH
 
-/********** ApplyOnce: transactional apply + commit/push outside txn **********/
+// XGIT:BEGIN APPLY ONCE
+// ApplyOnce：用事务包裹“执行阶段”，成功后再统一提交/推送
 func ApplyOnce(logger *DualLogger, repo string, patch *Patch) {
 	log := logger.Log
 	logf := func(format string, a ...any) { if logger != nil { logger.Log(format, a...) } }
 
-	// 1) 事务阶段：逐条执行 file.*，失败自动回滚
+	// 1) 事务阶段：逐条执行 file.*，任一失败则回滚到补丁前 HEAD
 	err := WithGitTxn(repo, logf, func() error {
 		for i, op := range patch.Ops {
 			tag := fmt.Sprintf("%s #%d", op.Cmd, i+1)
@@ -165,8 +169,9 @@ func ApplyOnce(logger *DualLogger, repo string, patch *Patch) {
 	}
 
 	// 2) 成功后统一 stage/commit/push（不置于事务内）
-	_, _, _ = shell("git", "-C", repo, "add", "-A")
-	names, _, _ := shell("git", "-C", repo, "diff", "--cached", "--name-only")
+	_ = runCmd("git", "-C", repo, "add", "-A")
+
+	names, _ := runCmdOut("git", "-C", repo, "diff", "--cached", "--name-only")
 	if strings.TrimSpace(names) == "" {
 		logger.Log("ℹ️ 无改动需要提交。")
 		logger.Log("✅ 本次补丁完成")
@@ -177,43 +182,22 @@ func ApplyOnce(logger *DualLogger, repo string, patch *Patch) {
 	author := "XGit Bot <bot@xgit.local>"
 	log("ℹ️ 提交说明：%s", commit)
 	log("ℹ️ 提交作者：%s", author)
-	_, _, _ = shell("git", "-C", repo, "commit", "--author", author, "-m", commit)
+
+	_ = runCmd("git", "-C", repo, "commit", "--author", author, "-m", commit)
 	log("✅ 已提交：%s", commit)
 
 	log("🚀 正在推送（origin HEAD）…")
-	if _, er, err := shell("git", "-C", repo, "push", "origin", "HEAD"); err != nil {
-		log("❌ 推送失败：%s", er)
+	if _, err := runCmdOut("git", "-C", repo, "push", "origin", "HEAD"); err != nil {
+		log("❌ 推送失败：%v", err)
 	} else {
 		log("🚀 推送完成")
 	}
 	log("✅ 本次补丁完成")
 }
+// XGIT:END APPLY ONCE
 
-/********** (Deprecated) ApplyPatch: keep for legacy callers **********/
-func ApplyPatch(repo string, ops []FileOp, logger DualLogger) error {
-	logf := func(format string, a ...any) { logger.Log(format, a...) }
-	return WithGitTxn(repo, logf, func() error {
-		for i, op := range ops {
-			if err := applyOp(repo, &op, &logger); err != nil {
-				return fmt.Errorf("op#%d: %w", i+1, err)
-			}
-		}
-		return nil
-	})
-}
-
-/********** tiny shell helpers (stdout, stderr, err) **********/
-func shell(name string, args ...string) (string, string, error) {
-	cmd := exec.Command(name, args...)
-	out, err := cmd.CombinedOutput()
-	stdout := string(out)
-	if err != nil {
-		return "", stdout, err
-	}
-	return stdout, "", nil
-}
-
-/********** git helpers + txn **********/
+// XGIT:BEGIN GIT_TXN_HELPERS
+// 说明：仅保留 runCmd / runCmdOut + WithGitTxn；不再提供 shell() 简化器
 func runCmd(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
 	out, err := cmd.CombinedOutput()
@@ -270,3 +254,4 @@ func WithGitTxn(repo string, logf func(string, ...any), fn func() error) error {
 	}
 	return nil
 }
+// XGIT:END GIT_TXN_HELPERS
