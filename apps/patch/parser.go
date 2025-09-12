@@ -74,47 +74,12 @@ func ParsePatch(data string, eof string) (*Patch, error) {
 		switch kind {
 		case "file":
 			switch action {
-			case "move":
-				parts := reMoveSep.Split(h, 2)
-				if len(parts) == 2 {
-					cur.Path = strings.TrimSpace(parts[0])
-					cur.To = strings.TrimSpace(parts[1])
-				} else {
-					cur.Path = h
-				}
-				// move 无体
-				p.Ops = append(p.Ops, cur)
-				cur = nil
-				inBody = false
-			case "delete", "chmod", "eol", "replace":
-				// delete: 只要 path
-				// chmod/eol/replace: header 支持 path 后跟 kv
-				// 先切出 path（首个空格前）
-				path, rest := splitFirstField(h)
-				cur.Path = path
-				kv := parseKVs(rest)
-				if len(kv) > 0 {
-					for k, v := range kv {
-						cur.Args[k] = v
-					}
-				}
-				// delete/ chmod / eol：无体；replace 既可 header 给 replacement，也可 body 给 replacement
-				if cur.Cmd == "replace" {
-					// 需要体？看有没有 to/with 参数；没有则体作为 replacement
-					inBody = (cur.Args["to"] == "" && cur.Args["with"] == "")
-				} else if cur.Cmd == "delete" {
-					p.Ops = append(p.Ops, cur)
-					cur = nil
-					inBody = false
-				} else { // chmod/eol
+			 else { // chmod/eol
 					p.Ops = append(p.Ops, cur)
 					cur = nil
 					inBody = false
 				}
-			default:
-				// write/append/prepend/image/binary/diff ……需要体
-				cur.Path = h
-				inBody = true
+			
 			}
 		}
 	}
@@ -155,7 +120,7 @@ func splitFirstField(h string) (first string, rest string) {
 	return first, rest
 }
 
-func parseKVs(s string) map[string]string {
+ string) map[string]string {
 	m := map[string]string{}
 	s = strings.TrimSpace(s)
 	if s == "" {
