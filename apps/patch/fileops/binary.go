@@ -3,7 +3,7 @@ XGIT FileOps: file.binary
 说明：写入二进制（Base64）；常用于非图片资源
 */
 // XGIT:BEGIN GO:PACKAGE
-package main
+package fileops
 // XGIT:END GO:PACKAGE
 
 // XGIT:BEGIN GO:IMPORTS
@@ -16,7 +16,7 @@ import (
 
 // XGIT:BEGIN GO:FUNC_FILE_BINARY
 // FileBinary 写入二进制 —— 协议: file.binary
-func FileBinary(repo, rel, base64Data string, logger *DualLogger) error {
+func FileBinary(repo, rel, base64Data string, logger DualLogger) error {
 	abs := filepath.Join(repo, rel)
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil { return err }
 	raw, err := base64.StdEncoding.DecodeString(base64Data)

@@ -2,7 +2,7 @@
 XGIT FileOps: 通用文本工具（换行规范化等）
 */
 // XGIT:BEGIN GO:PACKAGE
-package main
+package fileops
 // XGIT:END GO:PACKAGE
 
 // XGIT:BEGIN GO:IMPORTS

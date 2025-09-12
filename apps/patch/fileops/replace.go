@@ -3,7 +3,7 @@ XGIT FileOps: file.replace
 说明：在单文件范围内做替换（支持纯文本/正则、大小写敏感、行号范围）
 */
 // XGIT:BEGIN GO:PACKAGE
-package main
+package fileops
 // XGIT:END GO:PACKAGE
 
 // XGIT:BEGIN GO:IMPORTS
@@ -19,7 +19,7 @@ import (
 // FileReplace 文本替换 —— 协议: file.replace
 // 如果 useRegex=true 则 treat 'find' 为正则；否则为字面量
 // 行范围 [lineStart, lineEnd]，<=0 表示不限制
-func FileReplace(repo, rel, find, repl string, caseSensitive, useRegex bool, lineStart, lineEnd int, logger *DualLogger) error {
+func FileReplace(repo, rel, find, repl string, caseSensitive, useRegex bool, lineStart, lineEnd int, logger DualLogger) error {
 	abs := filepath.Join(repo, rel)
 	b, err := os.ReadFile(abs)
 	if err != nil { return err }
@@ -35,7 +35,6 @@ func FileReplace(repo, rel, find, repl string, caseSensitive, useRegex bool, lin
 	var out string
 
 	if useRegex {
-		flags := 0
 		re := (*regexp.Regexp)(nil)
 		if caseSensitive {
 			re = regexp.MustCompile(find)

@@ -3,7 +3,7 @@ XGIT FileOps: file.eol
 说明：统一换行风格（lf/crlf），可选确保末行换行
 */
 // XGIT:BEGIN GO:PACKAGE
-package main
+package fileops
 // XGIT:END GO:PACKAGE
 
 // XGIT:BEGIN GO:IMPORTS
@@ -16,7 +16,7 @@ import (
 
 // XGIT:BEGIN GO:FUNC_FILE_EOL
 // FileEOL 换行规范化 —— 协议: file.eol
-func FileEOL(repo, rel string, style string, ensureNL bool, logger *DualLogger) error {
+func FileEOL(repo, rel string, style string, ensureNL bool, logger DualLogger) error {
 	abs := filepath.Join(repo, rel)
 	b, err := os.ReadFile(abs)
 	if err != nil { return err }

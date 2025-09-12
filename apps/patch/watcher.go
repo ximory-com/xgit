@@ -35,9 +35,9 @@ func (w *Watcher) StableAndEOF() (ok bool, size int, hash8 string) {
 		return false, 0, ""
 	}
 
-	// 严格 EOF
+	// 严格 EOF：用 parser.go 的字节版 lastMeaningfulLine
 	data, _ := os.ReadFile(w.PatchFile)
-	line := lastMeaningfulLine(data) // 用 parser.go 里的实现
+	line := lastMeaningfulLine(data)
 	if line != w.EOFMark {
     	if !w.eofWarned {
         	w.logger.Log("⏳ 等待严格 EOF 标记“%s”", w.EOFMark)

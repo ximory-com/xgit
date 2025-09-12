@@ -3,7 +3,7 @@ XGIT FileOps: file.prepend
 说明：在目标文件开头插入内容；若不存在则创建（等价于 write）
 */
 // XGIT:BEGIN GO:PACKAGE
-package main
+package fileops
 // XGIT:END GO:PACKAGE
 
 // XGIT:BEGIN GO:IMPORTS
@@ -15,7 +15,7 @@ import (
 
 // XGIT:BEGIN GO:FUNC_FILE_PREPEND
 // FilePrepend 开头插入 —— 协议: file.prepend
-func FilePrepend(repo, rel string, data []byte, logger *DualLogger) error {
+func FilePrepend(repo, rel string, data []byte, logger DualLogger) error {
 	abs := filepath.Join(repo, rel)
 	_ = os.MkdirAll(filepath.Dir(abs), 0o755)
 	old, _ := os.ReadFile(abs)

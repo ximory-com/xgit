@@ -3,7 +3,7 @@ XGIT FileOps: file.append
 说明：在目标文件末尾追加内容；若不存在则创建
 */
 // XGIT:BEGIN GO:PACKAGE
-package main
+package fileops
 // XGIT:END GO:PACKAGE
 
 // XGIT:BEGIN GO:IMPORTS
@@ -15,7 +15,7 @@ import (
 
 // XGIT:BEGIN GO:FUNC_FILE_APPEND
 // FileAppend 末尾追加 —— 协议: file.append
-func FileAppend(repo, rel string, data []byte, logger *DualLogger) error {
+func FileAppend(repo, rel string, data []byte, logger DualLogger) error {
 	abs := filepath.Join(repo, rel)
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		if logger != nil { logger.Log("❌ file.append mkdir 失败：%s (%v)", rel, err) }

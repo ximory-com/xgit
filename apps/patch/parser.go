@@ -1,6 +1,7 @@
-package patch
+package main
 
 import (
+	"bytes"
 	"bufio"
 	"fmt"
 	"regexp"
@@ -205,4 +206,32 @@ func splitBySpacesRespectQuotes(s string) []string {
 	}
 	return out
 }
+// XGIT:BEGIN GO:FUNC_LAST_MEANINGFUL_LINE
+// lastMeaningfulLine 返回字节流中“最后一个非空白行”（去掉行尾 \r）的原样文本。
+// 说明：用于严格 EOF 校验，配合 watcher 在进入执行前做最后一道门。
+func lastMeaningfulLine(b []byte) string {
+	last := ""
+	start := 0
+	for start <= len(b) {
+		// 逐行切分（按 \n），兼容最后一行无换行
+		nl := bytes.IndexByte(b[start:], '\n')
+		var line []byte
+		if nl < 0 {
+			line = b[start:]
+			start = len(b) + 1
+		} else {
+			line = b[start : start+nl]
+			start += nl + 1
+		}
+		// 去掉行尾 \r
+		if len(line) > 0 && line[len(line)-1] == '\r' {
+			line = line[:len(line)-1]
+		}
+		if strings.TrimSpace(string(line)) != "" {
+			last = string(line)
+		}
+	}
+	return last
+}
+// XGIT:END GO:FUNC_LAST_MEANINGFUL_LINE
 // XGIT:END PARSER

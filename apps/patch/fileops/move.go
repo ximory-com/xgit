@@ -3,7 +3,7 @@ XGIT FileOps: file.move
 说明：重命名/移动（支持跨目录）；不存在则忽略
 */
 // XGIT:BEGIN GO:PACKAGE
-package main
+package fileops
 // XGIT:END GO:PACKAGE
 
 // XGIT:BEGIN GO:IMPORTS
@@ -15,7 +15,7 @@ import (
 
 // XGIT:BEGIN GO:FUNC_FILE_MOVE
 // FileMove 移动/改名 —— 协议: file.move
-func FileMove(repo, fromRel, toRel string, logger *DualLogger) error {
+func FileMove(repo, fromRel, toRel string, logger DualLogger) error {
 	from := filepath.Join(repo, fromRel)
 	to := filepath.Join(repo, toRel)
 	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {

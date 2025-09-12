@@ -3,7 +3,7 @@ XGIT FileOps: file.write
 说明：写入（覆盖）指定文件，若不存在则创建；写入后建议加入暂存（由上层处理）
 */
 // XGIT:BEGIN GO:PACKAGE
-package main
+package fileops
 // XGIT:END GO:PACKAGE
 
 // XGIT:BEGIN GO:IMPORTS
@@ -16,7 +16,7 @@ import (
 
 // XGIT:BEGIN GO:FUNC_FILE_WRITE
 // FileWrite 写入（覆盖）文件 —— 协议: file.write
-func FileWrite(repo, rel string, data []byte, logger *DualLogger) error {
+func FileWrite(repo, rel string, data []byte, logger DualLogger) error {
 	abs := filepath.Join(repo, rel)
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		if logger != nil { logger.Log("❌ file.write mkdir 失败：%s (%v)", rel, err) }

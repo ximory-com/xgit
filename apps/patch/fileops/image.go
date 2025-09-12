@@ -3,7 +3,7 @@ XGIT FileOps: file.image
 说明：写入图片（Base64），和 binary 类似，仅语义区分（后续可做额外校验）
 */
 // XGIT:BEGIN GO:PACKAGE
-package main
+package fileops
 // XGIT:END GO:PACKAGE
 
 // XGIT:BEGIN GO:IMPORTS
@@ -16,7 +16,7 @@ import (
 
 // XGIT:BEGIN GO:FUNC_FILE_IMAGE
 // FileImage 写入图片 —— 协议: file.image
-func FileImage(repo, rel, base64Data string, logger *DualLogger) error {
+func FileImage(repo, rel, base64Data string, logger DualLogger) error {
 	abs := filepath.Join(repo, rel)
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil { return err }
 	raw, err := base64.StdEncoding.DecodeString(base64Data)
