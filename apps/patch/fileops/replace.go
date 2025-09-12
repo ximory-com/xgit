@@ -36,8 +36,7 @@ import (
 //  count:    替换次数上限（<=0 表示全部）
 //  ensureEOFNewline: 替换后是否保证末尾有换行
 //  multiline: 正则多行模式（(?m)）
-//  logf:     日志函数，可为 nil
-func FileReplace(
+//  logf:     日志函数，可为 nil FileReplace(
 	repo, rel, find, repl string,
 	useRegex bool,
 	icase bool,
@@ -244,23 +243,19 @@ func FileReplace(
 }
 
 // ===== helpers =====
-
-func logfSafe(logf func(string, ...any), format string, a ...any) {
+ logfSafe(logf func(string, ...any), format string, a ...any) {
 	if logf != nil {
 		logf(format, a...)
 	}
 }
-
-func normalizeLF(s string) string {
+ normalizeLF(s string) string {
 	return strings.ReplaceAll(s, "\r\n", "\n")
 }
-
-func toCRLF(s string) string {
+ toCRLF(s string) string {
 	return strings.ReplaceAll(s, "\n", "\r\n")
 }
 
-// 区分大小写；count<=0 表示全部
-func replaceCaseSensitive(s, find, repl string, count int) (string, int) {
+// 区分大小写；count<=0 表示全部 replaceCaseSensitive(s, find, repl string, count int) (string, int) {
 	if find == "" {
 		return s, 0
 	}
@@ -281,8 +276,7 @@ func replaceCaseSensitive(s, find, repl string, count int) (string, int) {
 	return out, repld
 }
 
-// 不区分大小写；count<=0 表示全部
-func replaceCaseInsensitive(s, find, repl string, count int) (string, int) {
+// 不区分大小写；count<=0 表示全部 replaceCaseInsensitive(s, find, repl string, count int) (string, int) {
 	if find == "" {
 		return s, 0
 	}
