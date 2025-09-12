@@ -1,8 +1,8 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
+	"bufio"
 	"fmt"
 	"regexp"
 	"strings"
@@ -10,11 +10,10 @@ import (
 
 // XGIT:BEGIN PARSER TYPES
 type FileOp struct {
-	Cmd   string            // 形如 "file.write" / "file.move" 等
-	Path  string            // 目标路径；move 时为源路径
-	To    string            // move 目标路径
-	Body  string            // 需要主体的指令：write/append/prepend/image/binary/diff/replace(可选)
-	Args  map[string]string // 通用参数：kv 形式（mode/style/pattern/to/flags/...）
+	Cmd   string            // 指令名：file.write / file.replace / block.xxx / ...
+	Path  string            // 目标路径（仅 file.*）；必须由 header 中的 "双引号" 包裹给出
+	Body  string            // 正文（对 write/append/prepend/image/binary/diff/replace 等需要体的指令）
+	Args  map[string]string // 参数：全部来自 body 中的 @key … @end
 	Index int               // 预留
 }
 type Patch struct {
@@ -23,136 +22,192 @@ type Patch struct {
 // XGIT:END PARSER TYPES
 
 // XGIT:BEGIN PARSER
-// 解析补丁（支持 11 条 file.* 指令）
-// 头：=== file.<cmd>: <header> ===
-// 体：可选（需要体的命令才读）
-// 尾：=== end ===
+// 新协议要点：
+// 1) header 仅允许一个参数：
+//    - file.*   ："绝对或相对路径"，必须双引号包裹
+//    - block.*  ："块名称"，必须双引号包裹
+//    任何其它 header 内的 kv 或多余内容 → 直接报错
+// 2) 除 path/名称外，其它参数全部放入 body，采用 @key … @end 形式（多行安全）
+//    例如：
+//      @pattern
+//      ^foo.*$
+//      @end
+//      @with
+//      bar
+//      @end
+//      @regex
+//      true
+//      @end
+// 3) 对 write/append/prepend/image/binary/diff：正文内容默认就是 Body；也支持 @content 块覆盖。
+// 4) 对 replace：replacement 优先取 @with；若缺失则使用 Body 作为替换体。
+// 5) 对 move：目标路径从 @to 获取。
 func ParsePatch(data string, eof string) (*Patch, error) {
-	// 统一换行
 	text := strings.ReplaceAll(data, "\r", "")
 	lines := strings.Split(text, "\n")
 
-	// 严格 EOF：最后一个非空行必须等于 eof
-	last := ""
-	for _, l := range lines {
-		t := strings.TrimSpace(l)
-		if t != "" {
-			last = t
-		}
-	}
-	if last != eof {
-		return nil, fmt.Errorf("严格 EOF 校验失败：期望 %q，实际 %q", eof, last)
+	// 严格 EOF：最后一个非空白行必须等于 eof
+	if lastMeaningfulLine([]byte(data)) != eof {
+		return nil, fmt.Errorf("严格 EOF 校验失败：期望 %q", eof)
 	}
 
 	var (
-		p         = &Patch{Ops: make([]*FileOp, 0, 64)}
-		inBody    = false
-		cur       *FileOp
+		p          = &Patch{Ops: make([]*FileOp, 0, 64)}
+		inBody     = false
+		cur        *FileOp
 		// 统一头部：=== <kind>.<cmd>: <header> ===
-		reHead    = regexp.MustCompile(`^===\s*([a-z]+(?:\.[a-z_]+)?)\s*:\s*(.*?)\s*===\s*$`)
-		reMoveSep = regexp.MustCompile(`\s*->\s*`)
+		reHead 	   = regexp.MustCompile(`^===\s*([a-z]+(?:\.[a-z_]+)?)\s*:\s*(.*?)\s*===\s*$`)
 	)
 
-	startWrite := func(cmd, header string) {
-		// 收口之前的块（如果在 body 中）
+	startWrite := func(cmd, headerRaw string) error {
+		// 收口前一块
 		if inBody && cur != nil {
 			p.Ops = append(p.Ops, cur)
 			inBody = false
 			cur = nil
 		}
-		cur = &FileOp{Cmd: strings.ToLower(cmd), Args: map[string]string{}}
+		cmd = strings.ToLower(strings.TrimSpace(cmd))
+		cur = &FileOp{Cmd: cmd, Args: map[string]string{}}
 
-		h := strings.TrimSpace(header)
-		kind, action := "", cur.Cmd
-		if i := strings.Index(cur.Cmd, "."); i > -1 {
-			kind = cur.Cmd[:i]
-			action = cur.Cmd[i+1:]
-		} else {
-			// 兼容意外输入（无点），当成单段指令
-			kind = cur.Cmd
+		// 解析 header：仅允许一个被双引号包裹的参数
+		header := strings.TrimSpace(headerRaw)
+		pathOrName, rest := splitFirstField(header)
+		if rest != "" {
+			return fmt.Errorf("header 仅允许一个参数，发现多余内容：%q", rest)
+		}
+		val, ok := mustDoubleQuoted(pathOrName)
+		if !ok {
+			return fmt.Errorf("path/name 必须用双引号包裹：%q", pathOrName)
 		}
 
-		if kind != "file" {
-			// 暂只支持 file.*
+		// 分类：file.* 用 Path；block.* 用 Args["block_name"]
+		kind := strings.SplitN(cmd, ".", 2)[0]
+		if kind == "file" {
+			cur.Path = val
+		} else if kind == "block" {
+			cur.Args["block_name"] = val
+		} else {
+			// 其它命名空间：按需拓展；默认也存到 Args["name"]
+			cur.Args["name"] = val
+		}
+
+		// 是否需要正文体？
+		switch cmd {
+		case "file.delete", "file.chmod", "file.eol", "file.move":
+			// 这些指令不强制正文，但允许 body 参数块（例如 file.move 的 @to）
+			inBody = true
+		case "file.replace", "file.write", "file.append", "file.prepend", "file.image", "file.binary", "file.diff":
+			inBody = true
+		default:
+			// 其它未知命令：允许 body，交由上层决定
+			inBody = true
+		}
+		return nil
+	}
+
+	// 逐行扫描
+	var bodyBuf []string
+	var inParam bool
+	var paramKey string
+	var paramBuf []string
+
+	flushBlock := func() {
+		if cur != nil {
+			// 参数块优先：若存在 @content，则 Body 取其值
+			if content, ok := cur.Args["@content"]; ok {
+				cur.Body = content
+				delete(cur.Args, "@content")
+			}
+			// 对 replace：替换体优先 @with；否则用 Body
+			if cur.Cmd == "file.replace" {
+				if with, ok := cur.Args["@with"]; ok {
+					cur.Body = with
+					delete(cur.Args, "@with")
+				}
+			}
+			p.Ops = append(p.Ops, cur)
+		}
+		inBody = false
+		cur = nil
+		bodyBuf = bodyBuf[:0]
+		inParam = false
+		paramKey = ""
+		paramBuf = paramBuf[:0]
+	}
+
+	setArg := func(k, v string) {
+		if k == "" {
 			return
 		}
-
-		switch action {
-		case "move":
-			// 1) 先尝试 A -> B 语法
-			if parts := reMoveSep.Split(h, 2); len(parts) == 2 {
-				cur.Path = strings.TrimSpace(trimQuotes(parts[0]))
-				cur.To = strings.TrimSpace(trimQuotes(parts[1]))
-			} else {
-				// 2) 退化到 path + kv（优先把第一段非 kv 当作路径，余下解析成 kv）
-				path2, kv2 := splitPathAndKVs(h)
-				cur.Path = path2
-				if v, ok := kv2["to"]; ok {
-					cur.To = v
-					delete(kv2, "to")
-				}
-				// 其余 kv 丢进 Args（命令未使用则忽略，不污染路径）
-				for k, v := range kv2 {
-					cur.Args[k] = v
-				}
-			}
-			// move 无体
-			p.Ops = append(p.Ops, cur)
-			cur = nil
-			inBody = false
-
-		case "delete", "chmod", "eol", "replace":
-			// 统一解析：取首段非 kv 作为路径；其余 key=value 进入 Args
-			path, kv := splitPathAndKVs(h)
-			cur.Path = path
-			for k, v := range kv {
-				cur.Args[k] = v
-			}
-			// delete / chmod / eol：无体；replace 体可选（若无 to/with，则 body 作为 replacement）
-			if action == "replace" {
-				inBody = (cur.Args["to"] == "" && cur.Args["with"] == "")
-			} else {
-				p.Ops = append(p.Ops, cur)
-				cur = nil
-				inBody = false
-			}
-
+		// 所有参数 key 统一小写；保留 @pattern/@with/@content 以便后处理
+		lk := strings.ToLower(k)
+		switch lk {
+		case "@pattern", "@with", "@content", "@to":
+			cur.Args[lk] = v
 		default:
-			// write/append/prepend/image/binary/diff ……需要体；头部可能跟无关 kv（忽略到 Args）
-			pth, kv := splitPathAndKVs(h)
-			cur.Path = pth
-			for k, v := range kv {
-				cur.Args[k] = v
-			}
-			inBody = true
+			cur.Args[lk] = strings.TrimSpace(v)
 		}
 	}
 
 	for _, raw := range lines {
 		line := strings.TrimRight(raw, "\n")
 
+		// 头部
 		if m := reHead.FindStringSubmatch(line); len(m) == 3 {
-			startWrite(m[1], m[2])
-			continue
-		}
-		if strings.TrimSpace(line) == "=== end ===" {
-			if inBody && cur != nil {
-				p.Ops = append(p.Ops, cur)
-				inBody = false
-				cur = nil
+			if err := startWrite(m[1], m[2]); err != nil {
+				return nil, err
 			}
 			continue
 		}
+		// 尾部
+		if strings.TrimSpace(line) == "=== end ===" {
+			if inBody && cur != nil {
+				// 先收尾最后一个未闭合的参数块
+				if inParam {
+					setArg(paramKey, strings.Join(paramBuf, "\n"))
+					inParam = false
+					paramKey = ""
+					paramBuf = paramBuf[:0]
+				}
+				// 若无 @content 且不是 replace 的 @with 模式，则把 bodyBuf 作为 Body
+				if cur.Body == "" && len(bodyBuf) > 0 {
+					cur.Body = strings.Join(bodyBuf, "\n") + "\n"
+				}
+				flushBlock()
+			}
+			continue
+		}
+
+		// body：参数块语法
 		if inBody && cur != nil {
-			cur.Body += line + "\n"
+			trim := strings.TrimSpace(line)
+			// 开始参数块：@key
+			if !inParam && strings.HasPrefix(trim, "@") && trim != "@end" {
+				inParam = true
+				paramKey = trim
+				paramBuf = paramBuf[:0]
+				continue
+			}
+			// 结束参数块：@end
+			if inParam && trim == "@end" {
+				setArg(paramKey, strings.Join(paramBuf, "\n"))
+				inParam = false
+				paramKey = ""
+				paramBuf = paramBuf[:0]
+				continue
+			}
+			// 收集参数块内容 / 普通正文
+			if inParam {
+				paramBuf = append(paramBuf, line)
+			} else {
+				bodyBuf = append(bodyBuf, line)
+			}
 		}
 	}
+
 	return p, nil
 }
 
-// --- 解析辅助 ---
-
-// splitFirstField: 老实现（保留以防他处复用）
+// 工具：切第一个“词”（按空白），返回 first, rest
 func splitFirstField(h string) (first string, rest string) {
 	h = strings.TrimSpace(h)
 	if h == "" {
@@ -167,102 +222,12 @@ func splitFirstField(h string) (first string, rest string) {
 	return first, rest
 }
 
-// parseKVs: 仅解析 k=v（v 可带引号），忽略非 k=v token
-func parseKVs(s string) map[string]string {
-	m := map[string]string{}
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return m
+// 工具：双引号强校验；返回内部文本与是否有效
+func mustDoubleQuoted(s string) (string, bool) {
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		return s[1:len(s)-1], true
 	}
-	// 以空格分割多个 kv；kv 为 k=v（v 允许引号）
-	toks := splitBySpacesRespectQuotes(s)
-	for _, t := range toks {
-		if k, v, ok := cutKV(t); ok {
-			m[strings.ToLower(k)] = trimQuotes(v)
-		}
-	}
-	return m
-}
-
-// splitPathAndKVs 将 header 拆成：路径（支持带空格/引号）+ 参数 kv
-// 规则：按 splitBySpacesRespectQuotes 切分 token；从头累积“非 k=v” token 构成路径，直到遇到第一个 k=v；后续均当 kv。
-func splitPathAndKVs(s string) (string, map[string]string) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return "", map[string]string{}
-	}
-	toks := splitBySpacesRespectQuotes(s)
-
-	pathTokens := make([]string, 0, len(toks))
-	kvStart := -1
-	for i, t := range toks {
-		if _, _, ok := cutKV(t); ok {
-			kvStart = i
-			break
-		}
-		pathTokens = append(pathTokens, t)
-	}
-	// 组装 kv
-	kv := map[string]string{}
-	if kvStart != -1 {
-		for _, t := range toks[kvStart:] {
-			if k, v, ok := cutKV(t); ok {
-				kv[strings.ToLower(strings.TrimSpace(k))] = trimQuotes(v)
-			}
-		}
-	}
-	// 路径 = 去引号后再用单个空格拼接（保持用户原始空格数量对语义无影响）
-	path := strings.TrimSpace(strings.Join(pathTokens, " "))
-	path = trimQuotes(path)
-	return path, kv
-}
-
-func cutKV(s string) (k, v string, ok bool) {
-	if i := strings.IndexByte(s, '='); i >= 0 {
-		return strings.TrimSpace(s[:i]), strings.TrimSpace(s[i+1:]), true
-	}
-	return "", "", false
-}
-
-func trimQuotes(s string) string {
-	s = strings.TrimSpace(s)
-	if len(s) >= 2 && ((s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'')) {
-		return s[1 : len(s)-1]
-	}
-	return s
-}
-
-func splitBySpacesRespectQuotes(s string) []string {
-	var out []string
-	var b strings.Builder
-	inQ := byte(0)
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if inQ == 0 && (c == '"' || c == '\'') {
-			inQ = c
-			b.WriteByte(c)
-			continue
-		}
-		if inQ != 0 {
-			b.WriteByte(c)
-			if c == inQ {
-				inQ = 0
-			}
-			continue
-		}
-		if c == ' ' || c == '\t' {
-			if b.Len() > 0 {
-				out = append(out, strings.TrimSpace(b.String()))
-				b.Reset()
-			}
-			continue
-		}
-		b.WriteByte(c)
-	}
-	if b.Len() > 0 {
-		out = append(out, strings.TrimSpace(b.String()))
-	}
-	return out
+	return "", false
 }
 
 // XGIT:BEGIN GO:FUNC_LAST_MEANINGFUL_LINE
