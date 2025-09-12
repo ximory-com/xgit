@@ -11,7 +11,7 @@ echo "== Repo =="; pwd; echo
 echo "== ls tests/data =="; ls -l tests/data | sed -n '1,200p'; echo
 
 # 1) p2_all_count0: 5 个独立 X
-n=$(grep -oE '\bX\b' tests/data/p2_all_count0.txt | wc -l | tr -d ' ')
+n=$(grep -oE '\\bX\\b' tests/data/p2_all_count0.txt | wc -l | tr -d ' ')
 [[ "$n" == "5" ]] && pass "p2_all_count0: X count == 5" || fail "p2_all_count0: expected 5 X, got $n"
 
 # 2) p2_single_line: 第 2 行 'L2: HIT'
@@ -25,25 +25,30 @@ grep -qE '^gamma$' tests/data/p2_inverted_range.txt || fail "p2_inverted_range: 
 pass "p2_inverted_range: alpha/beta/gamma present"
 
 # 4) p2_unicode: 无 foo/FOO；BAR >= 3
-! grep -qE '\bfoo\b' tests/data/p2_unicode.txt || fail "p2_unicode: still has foo"
-! grep -qE '\bFOO\b' tests/data/p2_unicode.txt || fail "p2_unicode: still has FOO"
-nbar=$(grep -oE '\bBAR\b' tests/data/p2_unicode.txt | wc -l | tr -d ' ')
+! grep -qE '\\bfoo\\b' tests/data/p2_unicode.txt || fail "p2_unicode: still has foo"
+! grep -qE '\\bFOO\\b' tests/data/p2_unicode.txt || fail "p2_unicode: still has FOO"
+nbar=$(grep -oE '\\bBAR\\b' tests/data/p2_unicode.txt | wc -l | tr -d ' ')
 [[ ${nbar:-0} -ge 3 ]] && pass "p2_unicode: BAR count >= 3 (=$nbar)" || fail "p2_unicode: BAR too few ($nbar)"
 
 # 5) p2_capture_move: key: value
-grep -qE '^first_name:\s*River$' tests/data/p2_capture_move.txt || fail "capture: first_name not normalized"
-grep -qE '^last_name:\s*Lee$'   tests/data/p2_capture_move.txt || fail "capture: last_name not normalized"
-grep -qE '^company:\s*XGit$'    tests/data/p2_capture_move.txt || fail "capture: company not normalized"
+grep -qE '^first_name:\\s*River$' tests/data/p2_capture_move.txt || fail "capture: first_name not normalized"
+grep -qE '^last_name:\\s*Lee$'   tests/data/p2_capture_move.txt || fail "capture: last_name not normalized"
+grep -qE '^company:\\s*XGit$'    tests/data/p2_capture_move.txt || fail "capture: company not normalized"
 pass "p2_capture_move: normalized"
 
 # 6) p2_anchor_range: L1 NEEDLE
 l1="$(sed -n '1p' tests/data/p2_anchor_range.txt)"
 [[ "$l1" =~ ^NEEDLE$ ]] && pass "p2_anchor_range: line1 NEEDLE" || fail "p2_anchor_range: line1 != NEEDLE"
 
-# 7) p2_crlf_keep2: one/TWO/three & CRLF
-grep -qE '^one$'   tests/data/p2_crlf_keep2.txt || fail "crlf: missing 'one'"
-grep -qE '^TWO$'   tests/data/p2_crlf_keep2.txt || fail "crlf: missing 'TWO'"
-grep -qE '^three$' tests/data/p2_crlf_keep2.txt || fail "crlf: missing 'three'"
+# 7) p2_crlf_keep2: 内容 & CRLF
+#    先校验内容：去掉每行末尾的 \\r 再匹配
+line_n_eq() { local n="$1" re="$2"; sed -n "${n}p" tests/data/p2_crlf_keep2.txt | sed 's/\\r$//' | grep -qE "$re"; }
+line_n_eq 1 '^one$'   || fail "crlf: missing 'one'"
+line_n_eq 2 '^TWO$'   || fail "crlf: missing 'TWO'"
+line_n_eq 3 '^three$' || fail "crlf: missing 'three'"
+pass "crlf: content ok (one/TWO/three)"
+
+#    再校验确为 CRLF（双保险）
 if command -v file >/dev/null 2>&1; then
   if file tests/data/p2_crlf_keep2.txt | grep -qi 'CRLF'; then
     pass "crlf: CRLF detected (file)"
