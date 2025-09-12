@@ -1,8 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"bufio"
+	"bytes"
 	"fmt"
 	"regexp"
 	"strings"
@@ -10,10 +10,10 @@ import (
 
 // XGIT:BEGIN PARSER TYPES
 type FileOp struct {
-	Cmd   string            // 指令名：file.write / file.replace / block.xxx / ...
-	Path  string            // 目标路径（仅 file.*）；必须由 header 中的 "双引号" 包裹给出
-	Body  string            // 正文（对 write/append/prepend/image/binary/diff/replace 等需要体的指令）
-	Args  map[string]string // 参数：全部来自 body 中的 @key … @end
+	Cmd   string            // 指令名：file.write / file.replace / ...
+	Path  string            // 目标路径（由 header 的 "双引号" 提供）
+	Body  string            // 正文（write/append/prepend 的默认内容；replace 无 with 时可用）
+	Args  map[string]string // 参数区解析的 K=V 与多行块（键一律小写）
 	Index int               // 预留
 }
 type Patch struct {
@@ -22,210 +22,173 @@ type Patch struct {
 // XGIT:END PARSER TYPES
 
 // XGIT:BEGIN PARSER
-// 新协议要点：
-// 1) header 仅允许一个参数：
-//    - file.*   ："绝对或相对路径"，必须双引号包裹
-//    - block.*  ："块名称"，必须双引号包裹
-//    任何其它 header 内的 kv 或多余内容 → 直接报错
-// 2) 除 path/名称外，其它参数全部放入 body，采用 @key … @end 形式（多行安全）
-//    例如：
-//      @pattern
-//      ^foo.*$
-//      @end
-//      @with
-//      bar
-//      @end
-//      @regex
-//      true
-//      @end
-// 3) 对 write/append/prepend/image/binary/diff：正文内容默认就是 Body；也支持 @content 块覆盖。
-// 4) 对 replace：replacement 优先取 @with；若缺失则使用 Body 作为替换体。
-// 5) 对 move：目标路径从 @to 获取。
+// 协议摘要：
+//  Header:  必须且仅 1 个双引号参数（路径/名称），示例：=== file.replace: "path with spaces.txt" ===
+//  Params:  出现在块体的最前部，直到遇到第一行“非参数”即结束参数区。两种形式：
+//           1) 单行 K=V
+//           2) 多行 K</>K：开始行 "K<"，结束行独占一行 ">K"；多行块内“非空行”必须以 1 个空格开头（缩进保护），解析时会剥掉该 1 个空格。
+//           同键多次赋值时，后者覆盖前者。
+//  Body:    参数区结束后至 "=== end ===" 的全部行（原样收集）。
+//  EOF:     严格校验最后一个非空白行等于传入 eof（通常是 "=== PATCH EOF ==="）。
 func ParsePatch(data string, eof string) (*Patch, error) {
 	text := strings.ReplaceAll(data, "\r", "")
+	if lastMeaningfulLine([]byte(text)) != eof {
+		return nil, fmt.Errorf("严格 EOF 校验失败：期望 %q，实际 %q", eof, lastMeaningfulLine([]byte(text)))
+	}
 	lines := strings.Split(text, "\n")
 
-	// 严格 EOF：最后一个非空白行必须等于 eof
-	if lastMeaningfulLine([]byte(data)) != eof {
-		return nil, fmt.Errorf("严格 EOF 校验失败：期望 %q", eof)
-	}
+	// 头部匹配
+	reHead := regexp.MustCompile(`^===\s*([a-z]+(?:\.[a-z_]+)?)\s*:\s*(.*?)\s*===\s*$`)
+
+	// 参数识别
+	reKV := regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$`)
+	reBlkStart := regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)<$`)
+	// 结束标记生成器（必须独占一行，且行首不能有空格；缩进保护可避免正文误触）
+	endMarker := func(key string) string { return ">" + key }
 
 	var (
-		p          = &Patch{Ops: make([]*FileOp, 0, 64)}
-		inBody     = false
-		cur        *FileOp
-		// 统一头部：=== <kind>.<cmd>: <header> ===
-		reHead 	   = regexp.MustCompile(`^===\s*([a-z]+(?:\.[a-z_]+)?)\s*:\s*(.*?)\s*===\s*$`)
+		p      = &Patch{Ops: make([]*FileOp, 0, 64)}
+		cur    *FileOp
+		inBody = false
+		// 当前 op 的解析状态
+		paramsDone = false // 一旦遇到第一行非参数，即切换为正文
 	)
 
-	startWrite := func(cmd, headerRaw string) error {
-		// 收口前一块
+	flush := func() {
 		if inBody && cur != nil {
 			p.Ops = append(p.Ops, cur)
-			inBody = false
-			cur = nil
 		}
-		cmd = strings.ToLower(strings.TrimSpace(cmd))
-		cur = &FileOp{Cmd: cmd, Args: map[string]string{}}
-
-		// 解析 header：仅允许一个被双引号包裹的参数
-		header := strings.TrimSpace(headerRaw)
-		pathOrName, rest := splitFirstField(header)
-		if rest != "" {
-			return fmt.Errorf("header 仅允许一个参数，发现多余内容：%q", rest)
-		}
-		val, ok := mustDoubleQuoted(pathOrName)
-		if !ok {
-			return fmt.Errorf("path/name 必须用双引号包裹：%q", pathOrName)
-		}
-
-		// 分类：file.* 用 Path；block.* 用 Args["block_name"]
-		kind := strings.SplitN(cmd, ".", 2)[0]
-		if kind == "file" {
-			cur.Path = val
-		} else if kind == "block" {
-			cur.Args["block_name"] = val
-		} else {
-			// 其它命名空间：按需拓展；默认也存到 Args["name"]
-			cur.Args["name"] = val
-		}
-
-		// 是否需要正文体？
-		switch cmd {
-		case "file.delete", "file.chmod", "file.eol", "file.move":
-			// 这些指令不强制正文，但允许 body 参数块（例如 file.move 的 @to）
-			inBody = true
-		case "file.replace", "file.write", "file.append", "file.prepend", "file.image", "file.binary", "file.diff":
-			inBody = true
-		default:
-			// 其它未知命令：允许 body，交由上层决定
-			inBody = true
-		}
-		return nil
+		cur = nil
+		inBody = false
+		paramsDone = false
 	}
 
-	// 逐行扫描
-	var bodyBuf []string
-	var inParam bool
-	var paramKey string
-	var paramBuf []string
-
-	flushBlock := func() {
-		if cur != nil {
-			// 参数块优先：若存在 @content，则 Body 取其值
-			if content, ok := cur.Args["@content"]; ok {
-				cur.Body = content
-				delete(cur.Args, "@content")
-			}
-			// 对 replace：替换体优先 @with；否则用 Body
-			if cur.Cmd == "file.replace" {
-				if with, ok := cur.Args["@with"]; ok {
-					cur.Body = with
-					delete(cur.Args, "@with")
-				}
-			}
+	startWrite := func(cmd, headerRaw string) error {
+		// 收口上一块
+		if inBody && cur != nil {
 			p.Ops = append(p.Ops, cur)
 		}
 		inBody = false
+		paramsDone = false
 		cur = nil
-		bodyBuf = bodyBuf[:0]
-		inParam = false
-		paramKey = ""
-		paramBuf = paramBuf[:0]
-	}
 
-	setArg := func(k, v string) {
-		if k == "" {
-			return
+		// 解析命令
+		cmd = strings.ToLower(strings.TrimSpace(cmd))
+		header := strings.TrimSpace(headerRaw)
+		val, ok := mustDoubleQuoted(header)
+		if !ok {
+			return fmt.Errorf("path/name 必须用双引号包裹：%q", header)
 		}
-		// 所有参数 key 统一小写；保留 @pattern/@with/@content 以便后处理
-		lk := strings.ToLower(k)
-		switch lk {
-		case "@pattern", "@with", "@content", "@to":
-			cur.Args[lk] = v
+
+		// 仅识别 file.*；未知种类直接报错（保持现有风格）
+		kind, action := "", cmd
+		if i := strings.Index(cmd, "."); i > -1 {
+			kind = cmd[:i]
+			action = cmd[i+1:]
+		} else {
+			kind = cmd
+		}
+		if kind != "file" {
+			return fmt.Errorf("未知种类: %s", kind)
+		}
+		switch action {
+		case "write", "append", "prepend", "replace", "delete", "move", "chmod", "eol", "image", "binary", "diff":
+			// ok
 		default:
-			cur.Args[lk] = strings.TrimSpace(v)
+			return fmt.Errorf("未知指令: %s", cmd)
 		}
+
+		cur = &FileOp{
+			Cmd:  cmd,
+			Path: val,
+			Args: map[string]string{},
+			Body: "",
+		}
+		inBody = true
+		return nil
 	}
 
-	for _, raw := range lines {
-		line := strings.TrimRight(raw, "\n")
+	// 主循环
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
 
-		// 头部
+		// 匹配头
 		if m := reHead.FindStringSubmatch(line); len(m) == 3 {
 			if err := startWrite(m[1], m[2]); err != nil {
 				return nil, err
 			}
 			continue
 		}
-		// 尾部
+		// 结束一个块
 		if strings.TrimSpace(line) == "=== end ===" {
-			if inBody && cur != nil {
-				// 先收尾最后一个未闭合的参数块
-				if inParam {
-					setArg(paramKey, strings.Join(paramBuf, "\n"))
-					inParam = false
-					paramKey = ""
-					paramBuf = paramBuf[:0]
-				}
-				// 若无 @content 且不是 replace 的 @with 模式，则把 bodyBuf 作为 Body
-				if cur.Body == "" && len(bodyBuf) > 0 {
-					cur.Body = strings.Join(bodyBuf, "\n") + "\n"
-				}
-				flushBlock()
-			}
+			flush()
 			continue
 		}
 
-		// body：参数块语法
-		if inBody && cur != nil {
-			trim := strings.TrimSpace(line)
-			// 开始参数块：@key
-			if !inParam && strings.HasPrefix(trim, "@") && trim != "@end" {
-				inParam = true
-				paramKey = trim
-				paramBuf = paramBuf[:0]
-				continue
-			}
-			// 结束参数块：@end
-			if inParam && trim == "@end" {
-				setArg(paramKey, strings.Join(paramBuf, "\n"))
-				inParam = false
-				paramKey = ""
-				paramBuf = paramBuf[:0]
-				continue
-			}
-			// 收集参数块内容 / 普通正文
-			if inParam {
-				paramBuf = append(paramBuf, line)
-			} else {
-				bodyBuf = append(bodyBuf, line)
-			}
+		// 仅在块内解析
+		if !inBody || cur == nil {
+			continue
 		}
+
+		if !paramsDone {
+			// 先尝试多行块：KEY<
+			if m := reBlkStart.FindStringSubmatch(line); len(m) == 2 {
+				key := strings.ToLower(m[1])
+				end := endMarker(m[1])
+				var b strings.Builder
+				// 读取直到 >KEY
+				for j := i + 1; j < len(lines); j++ {
+					l := lines[j]
+					// 结束标记必须严格匹配独立一行，且不允许前置空格
+					if l == end {
+						// 收敛并落到 Args
+						cur.Args[key] = b.String()
+						i = j // 跳过到结束行
+						goto nextLine
+					}
+					// 缩进保护：非空行必须以 1 个空格开头
+					if strings.TrimSpace(l) == "" {
+						// 空行，按空行处理（不剥空格）
+						b.WriteString(l)
+						b.WriteString("\n")
+						continue
+					}
+					if !strings.HasPrefix(l, " ") {
+						return nil, fmt.Errorf("多行块 %s< 的正文非空行必须以 1 个空格开头（行 %d）", key, j+1)
+					}
+					// 剥掉第 1 个空格，保留其余内容与换行
+					b.WriteString(l[1:])
+					b.WriteString("\n")
+				}
+				return nil, fmt.Errorf("多行块 %s< 未找到结束标记 %s", key, end)
+			}
+
+			// 再尝试单行 K=V
+			if m := reKV.FindStringSubmatch(line); len(m) == 3 {
+				key := strings.ToLower(m[1])
+				val := strings.TrimRight(m[2], "\n")
+				cur.Args[key] = val
+				continue
+			}
+
+			// 否则视为参数区结束，当前行及后续全部并入 Body
+			paramsDone = true
+			// fallthrough to Body append
+		}
+
+		// Body：把当前行（以及后续直到 === end === 前的行）按原样写入
+		cur.Body += line + "\n"
+	nextLine:
 	}
 
 	return p, nil
 }
 
-// 工具：切第一个“词”（按空白），返回 first, rest
-func splitFirstField(h string) (first string, rest string) {
-	h = strings.TrimSpace(h)
-	if h == "" {
-		return "", ""
-	}
-	sc := bufio.NewScanner(strings.NewReader(h))
-	sc.Split(bufio.ScanWords)
-	if sc.Scan() {
-		first = sc.Text()
-		rest = strings.TrimSpace(strings.TrimPrefix(h, first))
-	}
-	return first, rest
-}
-
-// 工具：双引号强校验；返回内部文本与是否有效
+// mustDoubleQuoted: 若 s 为 "xxxx" 形式，返回去引号的值和 true；否则 false
 func mustDoubleQuoted(s string) (string, bool) {
+	s = strings.TrimSpace(s)
 	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
-		return s[1:len(s)-1], true
+		return s[1 : len(s)-1], true
 	}
 	return "", false
 }
