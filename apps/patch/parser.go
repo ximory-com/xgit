@@ -1,358 +1,208 @@
-package main
+package patch
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
-	"os"
-	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 )
 
-// =======================================================
-// XGIT 解析器 v2（仅支持 11 条 file.* 指令；明确移除旧版 `file:`）
-//
-// 支持的头：
-//   === file.<op>: <head> ===
-//   <op> ∈ { write | append | prepend | replace | delete | move | copy | mkdir | chmod | eol | binary }
-//
-// 统一严格 EOF：最后一个非空行必须等于传入的 eofMark。
-// 写类操作（write/append/prepend/replace）为了兼容现有 apply，会同步填充到 Patch.Files。
-// 其余操作进入 Patch.Ops，后续由 apply 分派执行。
-// =======================================================
-
-// ----- 公开类型（与现有代码对齐）-----
-type Patch struct {
-	Commit string
-	Author string
-	Files  []FileChunk   // 仅写类操作会落这里（write/append/prepend/replace），便于旧 apply 过渡
-	Blocks []BlockChunk  // 预留：区块功能后续接入
-	Ops    []FileOp      // 新：完整的 11 类文件操作
-}
-
-// 兼容旧结构：文件块
-type FileChunk struct {
-	Path    string
-	Content string
-	Mode    string // write/append/prepend/replace
-}
-
-// 兼容旧结构：区块（预留）
-type BlockChunk struct {
-	Path   string
-	Anchor string
-	Mode   string // replace/append/prepend/append_once
-	Index  int
-	Body   string
-}
-
-// 新增：统一文件操作描述
+// XGIT:BEGIN PARSER TYPES
 type FileOp struct {
-	Op string // write/append/prepend/replace/delete/move/copy/mkdir/chmod/eol/binary
-
-	// 路径相关
-	Path string // 目标路径
-	From string // move/copy 源路径
-	Dir  string // mkdir 目录路径
-
-	// 内容相关
-	Body string // write/append/prepend/replace/binary 的正文（binary 为 Base64 文本）
-
-	// 替换相关（file.replace）
-	Find        string
-	ReplaceWith string
-	Regex       bool
-	Flags       string // i,m,s 等
-
-	// chmod/eol 参数
-	Chmod   string // "+x" / "755" / "644" 等
-	EOL     string // "lf" / "crlf"
-	EnsureNL bool  // true => 末行补换行
-
-	// 写类模式（冗余，便于旧逻辑）
-	Mode string
+	Cmd   string            // write/append/prepend/replace/delete/move/chmod/eol/image/binary/diff
+	Path  string            // 目标路径；move 时为源路径
+	To    string            // move 目标路径
+	Body  string            // 需要主体的指令：write/append/prepend/image/binary/diff/replace(可选)
+	Args  map[string]string // 通用参数：kv 形式（mode/style/pattern/to/flags/...）
+	Index int               // 预留
 }
+type Patch struct {
+	Ops []*FileOp
+}
+// XGIT:END PARSER TYPES
 
-// ----- 指令头正则 -----
-var (
-	// 新版：=== file.<op>: head ===
-	rHeadFileOp = regexp.MustCompile(`^===\s*file\.(write|append|prepend|replace|delete|move|copy|mkdir|chmod|eol|binary):\s*(.+?)\s*===$`)
+// XGIT:BEGIN PARSER
+// 解析补丁（支持 11 条 file.* 指令）
+// 头：=== file.<cmd>: <header> ===
+// 体：可选（需要体的命令才读）
+// 尾：=== end ===
+func ParsePatch(data string, eof string) (*Patch, error) {
+	text := strings.ReplaceAll(data, "\r", "")
+	lines := strings.Split(text, "\n")
 
-	// 旧版：明确报错
-	rHeadLegacyFile = regexp.MustCompile(`^===\s*file:\s*(.+?)\s*===$`)
-
-	// 结尾
-	rEnd = regexp.MustCompile(`^===\s*end\s*===$`)
-)
-
-// ----- 入口 -----
-func ParsePatch(patchFile string, eofMark string) (*Patch, error) {
-	raw, err := os.ReadFile(patchFile)
-	if err != nil {
-		return nil, err
-	}
-	// 严格 EOF（最后一个非空行）
-	last := lastMeaningfulLine(raw)
-	if last != eofMark {
-		return nil, fmt.Errorf("严格 EOF 校验失败：期望『%s』，实得『%s』", eofMark, last)
-	}
-
-	p := &Patch{}
-	lines := splitLines(raw)
-
-	// 读取头字段（直到遇到第一个 '=== '）
-	for i := 0; i < len(lines); i++ {
-		line := strings.TrimRight(lines[i], "\r")
-		if strings.HasPrefix(line, "commitmsg:") && p.Commit == "" {
-			p.Commit = strings.TrimSpace(line[len("commitmsg:"):])
-			continue
-		}
-		if strings.HasPrefix(line, "author:") && p.Author == "" {
-			p.Author = strings.TrimSpace(line[len("author:"):])
-			continue
-		}
-		if strings.HasPrefix(line, "repo:") {
-			// repo 由外层处理
-			continue
-		}
-		if strings.HasPrefix(line, "===") {
-			break
+	// 严格 EOF：最后一个非空行
+	last := ""
+	for _, l := range lines {
+		t := strings.TrimSpace(l)
+		if t != "" {
+			last = t
 		}
 	}
+	if last != eof {
+		return nil, fmt.Errorf("严格 EOF 校验失败：期望 %q，实际 %q", eof, last)
+	}
 
-	// 块解析
-	in := 0 // 0=无；2=file.op；3=（预留）block
-	var curBody bytes.Buffer
-	var curOp FileOp
+	var (
+		p          = &Patch{Ops: make([]*FileOp, 0, 64)}
+		inBody     = false
+		cur        *FileOp
+		// 统一头部：=== file.<cmd>: <header> ===
+		reHead     = regexp.MustCompile(`^===\s*file\.([a-zA-Z0-9_]+)\s*:\s*(.*?)\s*===\s*$`)
+		reMoveSep  = regexp.MustCompile(`\s*->\s*`)
+	)
 
-	for i := 0; i < len(lines); i++ {
-		line := strings.TrimRight(lines[i], "\r")
+	startWrite := func(cmd, header string) {
+		// 收口之前的块
+		if inBody && cur != nil {
+			p.Ops = append(p.Ops, cur)
+			inBody = false
+			cur = nil
+		}
+		cur = &FileOp{Cmd: strings.ToLower(cmd), Args: map[string]string{}}
 
-		if in == 0 {
-			// 明确拒绝旧版
-			if m := rHeadLegacyFile.FindStringSubmatch(line); len(m) > 0 {
-				return nil, fmt.Errorf("已移除旧版头 '=== file: <path> ==='，请改用 '=== file.write: <path> ==='")
+		h := strings.TrimSpace(header)
+		switch cur.Cmd {
+		case "move":
+			parts := reMoveSep.Split(h, 2)
+			if len(parts) == 2 {
+				cur.Path = strings.TrimSpace(parts[0])
+				cur.To = strings.TrimSpace(parts[1])
+			} else {
+				cur.Path = h
 			}
-			// 新版 file.<op>
-			if m := rHeadFileOp.FindStringSubmatch(line); len(m) > 0 {
-				in = 2
-				curBody.Reset()
-				op := strings.ToLower(m[1])
-				head := strings.TrimSpace(m[2])
-				curOp = parseOpHead(op, head)
-				continue
-			}
-			continue
-		}
-
-		if rEnd.MatchString(line) {
-			switch in {
-			case 2: // file.<op>
-				body := curBody.String()
-				switch curOp.Op {
-				case "write", "append", "prepend", "replace", "binary":
-					curOp.Body = normalizeBody(body)
-					// 映射进 Files 以兼容旧 apply（仅写类）
-					if curOp.Op == "write" || curOp.Op == "append" || curOp.Op == "prepend" || curOp.Op == "replace" {
-						p.Files = append(p.Files, FileChunk{
-							Path:    curOp.Path,
-							Content: curOp.Body,
-							Mode:    curOp.Op,
-						})
-					}
-				default:
-					curOp.Body = body // 通常为空，保留
+			// move 无体
+			p.Ops = append(p.Ops, cur)
+			cur = nil
+			inBody = false
+		case "delete", "chmod", "eol", "replace":
+			// delete: 只要 path
+			// chmod/eol/replace: header 支持 path 后跟 kv
+			// 先切出 path（首个空格前）
+			path, rest := splitFirstField(h)
+			cur.Path = path
+			kv := parseKVs(rest)
+			if len(kv) > 0 {
+				for k, v := range kv {
+					cur.Args[k] = v
 				}
-				p.Ops = append(p.Ops, curOp)
 			}
-			in = 0
-			curBody.Reset()
-			continue
-		}
-
-		// 累积正文
-		if in != 0 {
-			curBody.WriteString(line)
-			curBody.WriteByte('\n')
+			// delete/ chmod / eol：无体；replace 既可 header 给 replacement，也可 body 给 replacement
+			if cur.Cmd == "replace" {
+				// 需要体？看有没有 to/with 参数；没有则体作为 replacement
+				inBody = (cur.Args["to"] == "" && cur.Args["with"] == "")
+			} else if cur.Cmd == "delete" {
+				p.Ops = append(p.Ops, cur)
+				cur = nil
+				inBody = false
+			} else { // chmod/eol
+				p.Ops = append(p.Ops, cur)
+				cur = nil
+				inBody = false
+			}
+		default:
+			// write/append/prepend/image/binary/diff ……需要体
+			cur.Path = h
+			inBody = true
 		}
 	}
 
+	for _, raw := range lines {
+		line := strings.TrimRight(raw, "\n")
+
+		if m := reHead.FindStringSubmatch(line); len(m) == 3 {
+			startWrite(m[1], m[2])
+			continue
+		}
+		if strings.TrimSpace(line) == "=== end ===" {
+			if inBody && cur != nil {
+				p.Ops = append(p.Ops, cur)
+				inBody = false
+				cur = nil
+			}
+			continue
+		}
+		if inBody && cur != nil {
+			cur.Body += line + "\n"
+		}
+	}
 	return p, nil
 }
 
-// ----- 解析头参数 -----
-func parseOpHead(op string, head string) FileOp {
-	op = strings.ToLower(strings.TrimSpace(op))
-	head = strings.TrimSpace(head)
-
-	// 支持 head 内 KV（空格或 & 分隔）
-	kv := parseKV(head)
-
-	switch op {
-	case "write", "append", "prepend":
-		return FileOp{Op: op, Path: normPath(head), Mode: op}
-	case "replace":
-		// 允许： path?find=...&with=...&regex=1&flags=im
-		path := head
-		if i := strings.IndexAny(head, " ?"); i >= 0 {
-			path = strings.TrimSpace(head[:i])
-		}
-		return FileOp{
-			Op:          op,
-			Path:        normPath(path),
-			Find:        kv["find"],
-			ReplaceWith: kv["with"],
-			Regex:       asBool(kv["regex"]),
-			Flags:       kv["flags"],
-			Mode:        "replace",
-		}
-	case "delete":
-		return FileOp{Op: op, Path: normPath(head)}
-	case "move":
-		from, to := splitArrow(head)
-		return FileOp{Op: op, From: normPath(from), Path: normPath(to)}
-	case "copy":
-		from, to := splitArrow(head)
-		return FileOp{Op: op, From: normPath(from), Path: normPath(to)}
-	case "mkdir":
-		return FileOp{Op: op, Dir: normPath(head)}
-	case "chmod":
-		mode := firstNonEmpty(kv["mode"], kv["chmod"])
-		path := firstNonEmpty(kv["path"], head)
-		return FileOp{Op: op, Path: normPath(path), Chmod: mode}
-	case "eol":
-		path := firstNonEmpty(kv["path"], head)
-		style := strings.ToLower(firstNonEmpty(kv["style"], kv["eol"]))
-		ensure := asBool(firstNonEmpty(kv["ensure_nl"], kv["ensurenl"], kv["nl"]))
-		return FileOp{Op: op, Path: normPath(path), EOL: style, EnsureNL: ensure}
-	case "binary":
-		return FileOp{Op: op, Path: normPath(head)}
-	default:
-		// 未知操作：保守降级为 write（避免中断）
-		return FileOp{Op: "write", Path: normPath(head), Mode: "write"}
+func splitFirstField(h string) (first string, rest string) {
+	h = strings.TrimSpace(h)
+	if h == "" {
+		return "", ""
 	}
+	sc := bufio.NewScanner(strings.NewReader(h))
+	sc.Split(bufio.ScanWords)
+	if sc.Scan() {
+		first = sc.Text()
+		rest = strings.TrimSpace(strings.TrimPrefix(h, first))
+	}
+	return first, rest
 }
 
-// ----- 工具函数 -----
-func lastMeaningfulLine(raw []byte) string {
-	sc := bufio.NewScanner(bytes.NewReader(raw))
-	last := ""
-	for sc.Scan() {
-		s := strings.TrimRight(sc.Text(), "\r")
-		if strings.TrimSpace(s) != "" {
-			last = s
+func parseKVs(s string) map[string]string {
+	m := map[string]string{}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return m
+	}
+	// 以空格分割多个 kv；kv 为 k=v（v 允许引号）
+	toks := splitBySpacesRespectQuotes(s)
+	for _, t := range toks {
+		if k, v, ok := cutKV(t); ok {
+			m[strings.ToLower(k)] = trimQuotes(v)
 		}
 	}
-	return last
+	return m
 }
 
-func splitLines(raw []byte) []string {
-	return strings.Split(string(raw), "\n")
+func cutKV(s string) (k, v string, ok bool) {
+	if i := strings.IndexByte(s, '='); i >= 0 {
+		return strings.TrimSpace(s[:i]), strings.TrimSpace(s[i+1:]), true
+	}
+	return "", "", false
 }
 
-// 路径规范：*.md 或无扩展 => 文件名大写；其余 => 文件名小写；扩展小写；去首尾空白与 ./ 前缀
-func normPath(p string) string {
-	p = strings.TrimSpace(p)
-	p = strings.TrimPrefix(p, "./")
-	p = strings.ReplaceAll(p, "//", "/")
-	dir := filepath.Dir(p)
-	base := filepath.Base(p)
-	name, ext := base, ""
-	if i := strings.LastIndex(base, "."); i >= 0 {
-		name, ext = base[:i], base[i+1:]
-	}
-	extL := strings.ToLower(ext)
-	if ext == "" || extL == "md" {
-		name = strings.ToUpper(name)
-	} else {
-		name = strings.ToLower(name)
-	}
-	if extL != "" {
-		base = name + "." + extL
-	} else {
-		base = name
-	}
-	if dir == "." {
-		return base
-	}
-	return filepath.Join(dir, base)
-}
-
-func normalizeBody(s string) string {
-	s = strings.ReplaceAll(s, "\r", "")
-	if !strings.HasSuffix(s, "\n") {
-		s += "\n"
+func trimQuotes(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 2 && ((s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'')) {
+		return s[1:len(s)-1]
 	}
 	return s
 }
 
-func splitArrow(head string) (string, string) {
-	// "from => to" 或 "from=>to"
-	arr := strings.Split(head, "=>")
-	if len(arr) >= 2 {
-		return strings.TrimSpace(arr[0]), strings.TrimSpace(strings.Join(arr[1:], "=>"))
-	}
-	return head, head
-}
-
-func parseKV(s string) map[string]string {
-	out := map[string]string{}
-	rest := ""
-	if i := strings.Index(s, "?"); i >= 0 {
-		rest = s[i+1:]
-	} else if i := strings.Index(s, " "); i >= 0 {
-		rest = s[i+1:]
-	}
-	if rest == "" {
-		return out
-	}
-	parts := fieldsOrAmp(rest)
-	for _, seg := range parts {
-		if seg == "" {
+func splitBySpacesRespectQuotes(s string) []string {
+	var out []string
+	var b strings.Builder
+	inQ := byte(0)
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inQ == 0 && (c == '"' || c == '\'') {
+			inQ = c
+			b.WriteByte(c)
 			continue
 		}
-		k, v, ok := strings.Cut(seg, "=")
-		if !ok {
+		if inQ != 0 {
+			b.WriteByte(c)
+			if c == inQ {
+				inQ = 0
+			}
 			continue
 		}
-		out[strings.ToLower(strings.TrimSpace(k))] = strings.TrimSpace(v)
+		if c == ' ' || c == '\t' {
+			if b.Len() > 0 {
+				out = append(out, strings.TrimSpace(b.String()))
+				b.Reset()
+			}
+			continue
+		}
+		b.WriteByte(c)
+	}
+	if b.Len() > 0 {
+		out = append(out, strings.TrimSpace(b.String()))
 	}
 	return out
 }
-
-func fieldsOrAmp(s string) []string {
-	if strings.Contains(s, "&") {
-		ps := strings.Split(s, "&")
-		for i := range ps {
-			ps[i] = strings.TrimSpace(ps[i])
-		}
-		return ps
-	}
-	return strings.Fields(s)
-}
-
-func asBool(s string) bool {
-	s = strings.ToLower(strings.TrimSpace(s))
-	switch s {
-	case "1", "t", "true", "yes", "on":
-		return true
-	case "0", "f", "false", "no", "off", "":
-		return false
-	default:
-		if n, err := strconv.Atoi(s); err == nil {
-			return n != 0
-		}
-		return false
-	}
-}
-
-func firstNonEmpty(ss ...string) string {
-	for _, s := range ss {
-		if strings.TrimSpace(s) != "" {
-			return strings.TrimSpace(s)
-		}
-	}
-	return ""
-}
+// XGIT:END PARSER

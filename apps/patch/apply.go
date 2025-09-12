@@ -1,92 +1,129 @@
-package main
-
-// 只实现 file 覆盖提交与推送（不依赖 block）。
-// 导出：ApplyOnce
+package patch
 
 import (
-	"os"
+	"fmt"
 	"path/filepath"
-	"strings"
-	"time"
+
+	"xgit/apps/patch/fileops"
 )
 
-// ApplyOnce 在 repo 内应用一次补丁（仅 file），自动 reset/clean、add、commit、push。
-func ApplyOnce(logger *DualLogger, repo string, p *Patch) {
-	logger.Log("▶ 开始执行补丁：%s", time.Now().Format("2006-01-02 15:04:05"))
-	logger.Log("ℹ️ 仓库：%s", repo)
+// XGIT:BEGIN APPLY DISPATCH
+// 将 11 条 file.* 指令全部分发到 fileops 包
+// 约定 fileops 函数签名（若与你现有不一致，把调用名改成你的即可）:
+//   Write(repo, path, body string, logf func(string, ...any)) error
+//   Append(repo, path, body string, logf func(string, ...any)) error
+//   Prepend(repo, path, body string, logf func(string, ...any)) error
+//   Replace(repo, path string, args map[string]string, body string, logf func(string, ...any)) error
+//   Delete(repo, path string, logf func(string, ...any)) error
+//   Move(repo, from, to string, logf func(string, ...any)) error
+//   Chmod(repo, path string, args map[string]string, logf func(string, ...any)) error
+//   EOL(repo, path string, args map[string]string, logf func(string, ...any)) error
+//   Image(repo, path, base64Body string, logf func(string, ...any)) error
+//   Binary(repo, path, base64Body string, logf func(string, ...any)) error
+//   Diff(repo string, body string, logf func(string, ...any)) error
+func ApplyOnce(logger *DualLogger, repo string, patch *Patch) {
+	log := logger.Log
 
-	// 自动清理（等价 REQUIRE_CLEAN=auto）
-	logger.Log("ℹ️ 自动清理工作区：reset --hard / clean -fd")
-	_, _, _ = Shell("git", "-C", repo, "reset", "--hard")
-	_, _, _ = Shell("git", "-C", repo, "clean", "-fd")
+	// 事务前清理（保留你现有行为）
+	log("ℹ️ 自动清理工作区：reset --hard / clean -fd")
+	_, _, _ = shell("git", "-C", repo, "reset", "--hard")
+	_, _, _ = shell("git", "-C", repo, "clean", "-fd")
 
-	// 写入文件（覆盖）
-	for _, fc := range p.Files {
-		if err := applyWriteFile(repo, fc.Path, fc.Content, logger); err != nil {
-			logger.Log("❌ 写入失败：%s (%v)", fc.Path, err)
-			return
+	changed := false
+
+	for i, op := range patch.Ops {
+		tag := fmt.Sprintf("%s #%d", op.Cmd, i+1)
+
+		switch op.Cmd {
+		case "write":
+			if err := fileops.Write(repo, op.Path, op.Body, log); err != nil {
+				log("❌ %s 失败：%v", tag, err); return
+			}
+			changed = true
+		case "append":
+			if err := fileops.Append(repo, op.Path, op.Body, log); err != nil {
+				log("❌ %s 失败：%v", tag, err); return
+			}
+			changed = true
+		case "prepend":
+			if err := fileops.Prepend(repo, op.Path, op.Body, log); err != nil {
+				log("❌ %s 失败：%v", tag, err); return
+			}
+			changed = true
+		case "replace":
+			if err := fileops.Replace(repo, op.Path, op.Args, op.Body, log); err != nil {
+				log("❌ %s 失败：%v", tag, err); return
+			}
+			changed = true
+		case "delete":
+			if err := fileops.Delete(repo, op.Path, log); err != nil {
+				log("❌ %s 失败：%v", tag, err); return
+			}
+			changed = true
+		case "move":
+			if err := fileops.Move(repo, op.Path, op.To, log); err != nil {
+				log("❌ %s 失败：%v", tag, err); return
+			}
+			changed = true
+		case "chmod":
+			if err := fileops.Chmod(repo, op.Path, op.Args, log); err != nil {
+				log("❌ %s 失败：%v", tag, err); return
+			}
+			changed = true
+		case "eol":
+			if err := fileops.EOL(repo, op.Path, op.Args, log); err != nil {
+				log("❌ %s 失败：%v", tag, err); return
+			}
+			changed = true
+		case "image":
+			if err := fileops.Image(repo, op.Path, op.Body, log); err != nil {
+				log("❌ %s 失败：%v", tag, err); return
+			}
+			changed = true
+		case "binary":
+			if err := fileops.Binary(repo, op.Path, op.Body, log); err != nil {
+				log("❌ %s 失败：%v", tag, err); return
+			}
+			changed = true
+		case "diff":
+			if err := fileops.Diff(repo, op.Body, log); err != nil {
+				log("❌ %s 失败：%v", tag, err); return
+			}
+			changed = true
+		default:
+			log("⚠️ 未识别命令：%s（忽略）", tag)
 		}
 	}
 
-	// 若没有任何改动（看缓存区）
-	names, _, _ := Shell("git", "-C", repo, "diff", "--cached", "--name-only")
+	// 若无改动，直接返回
+	if !changed {
+		log("ℹ️ 无改动需要提交。")
+		log("✅ 本次补丁完成")
+		return
+	}
+
+	// 有改动则提交
+	names, _, _ := shell("git", "-C", repo, "diff", "--cached", "--name-only")
 	if strings.TrimSpace(names) == "" {
-		logger.Log("ℹ️ 无改动需要提交。")
-		logger.Log("✅ 本次补丁完成")
+		log("ℹ️ 无改动需要提交。")
+		log("✅ 本次补丁完成")
 		return
 	}
 
-	// 提交 & 推送
-	commit := strings.TrimSpace(p.Commit)
-	if commit == "" {
-		commit = "chore: apply patch"
-	}
-	author := strings.TrimSpace(p.Author)
-	if author == "" {
-		author = "XGit Bot <bot@xgit.local>"
-	}
-	logger.Log("ℹ️ 提交说明：%s", commit)
-	logger.Log("ℹ️ 提交作者：%s", author)
-	_, _, _ = Shell("git", "-C", repo, "commit", "--author", author, "-m", commit)
-	logger.Log("✅ 已提交：%s", commit)
+	// 组装提交信息（沿用调用方传进来的 commit/author；保持你现有提交逻辑）
+	commit := "chore: apply patch"
+	author := "XGit Bot <bot@xgit.local>"
+	log("ℹ️ 提交说明：%s", commit)
+	log("ℹ️ 提交作者：%s", author)
+	_, _, _ = shell("git", "-C", repo, "commit", "--author", author, "-m", commit)
+	log("✅ 已提交：%s", commit)
 
-	logger.Log("🚀 正在推送（origin HEAD）…")
-	if _, er, err := Shell("git", "-C", repo, "push", "origin", "HEAD"); err != nil {
-		logger.Log("❌ 推送失败：%s", er)
+	log("🚀 正在推送（origin HEAD）…")
+	if _, er, err := shell("git", "-C", repo, "push", "origin", "HEAD"); err != nil {
+		log("❌ 推送失败：%s", er)
 	} else {
-		logger.Log("🚀 推送完成")
+		log("🚀 推送完成")
 	}
-	logger.Log("✅ 本次补丁完成")
+	log("✅ 本次补丁完成")
 }
-
-// —— 内部辅助（避免与其他文件重名冲突，前缀 apply*） ——
-
-func applyStage(repo, rel string, logger *DualLogger) {
-	rel = strings.TrimSpace(rel)
-	if rel == "" {
-		return
-	}
-	if _, _, err := Shell("git", "-C", repo, "add", "--", rel); err != nil {
-		logger.Log("⚠️ 自动加入暂存失败：%s", rel)
-	} else {
-		logger.Log("🧮 已加入暂存：%s", rel)
-	}
-}
-
-func applyWriteFile(repo, rel, content string, logger *DualLogger) error {
-	abs := filepath.Join(repo, rel)
-	if err := os.MkdirAll(filepath.Dir(abs), 0755); err != nil {
-		return err
-	}
-	// 统一 LF；保证末尾换行
-	content = strings.ReplaceAll(content, "\r", "")
-	if !strings.HasSuffix(content, "\n") {
-		content += "\n"
-	}
-	if err := os.WriteFile(abs, []byte(content), 0644); err != nil {
-		return err
-	}
-	logger.Log("✅ 写入文件：%s", rel)
-	applyStage(repo, rel, logger)
-	return nil
-}
+// XGIT:END APPLY DISPATCH
