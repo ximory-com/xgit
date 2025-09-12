@@ -36,7 +36,8 @@ import (
 //  count:    替换次数上限（<=0 表示全部）
 //  ensureEOFNewline: 替换后是否保证末尾有换行
 //  multiline: 正则多行模式（(?m)）
-//  logf:     日志函数，可为 nil FileReplace(
+//  logf:     日志函数，可为 nil
+func FileReplace(
 	repo, rel, find, repl string,
 	useRegex bool,
 	icase bool,
@@ -66,7 +67,7 @@ import (
 
 	// 识别并记录原 EOL（CRLF/LF），统一转为 LF 处理
 	isCRLF := bytes.Contains(data, []byte("\r\n"))
-	text := normalizeLF(string(data))
+	text := normalizeLF(string(data)) // 来自 textutil.go
 
 	// 2) 计算行范围（安全钳制，不越界；1-based → 0-based）
 	lines := strings.Split(text, "\n")
@@ -145,7 +146,7 @@ import (
 			// 恢复原 EOL 并原子写入
 			out := text + "\n"
 			if isCRLF {
-				out = toCRLF(out)
+				out = toCRLF(out) // 来自 textutil.go
 			}
 			dir := filepath.Dir(abs)
 			tmpf, err := os.CreateTemp(dir, ".xgit_replace_*")
@@ -201,7 +202,7 @@ import (
 
 	// 恢复为原 EOL
 	if isCRLF {
-		result = toCRLF(result)
+		result = toCRLF(result) // 来自 textutil.go
 	}
 
 	// 6) 原子写入：临时文件 → fsync → rename；保留权限/mtime
@@ -243,19 +244,15 @@ import (
 }
 
 // ===== helpers =====
- logfSafe(logf func(string, ...any), format string, a ...any) {
+
+func logfSafe(logf func(string, ...any), format string, a ...any) {
 	if logf != nil {
 		logf(format, a...)
 	}
 }
- normalizeLF(s string) string {
-	return strings.ReplaceAll(s, "\r\n", "\n")
-}
- toCRLF(s string) string {
-	return strings.ReplaceAll(s, "\n", "\r\n")
-}
 
-// 区分大小写；count<=0 表示全部 replaceCaseSensitive(s, find, repl string, count int) (string, int) {
+// 区分大小写；count<=0 表示全部
+func replaceCaseSensitive(s, find, repl string, count int) (string, int) {
 	if find == "" {
 		return s, 0
 	}
@@ -276,7 +273,8 @@ import (
 	return out, repld
 }
 
-// 不区分大小写；count<=0 表示全部 replaceCaseInsensitive(s, find, repl string, count int) (string, int) {
+// 不区分大小写；count<=0 表示全部
+func replaceCaseInsensitive(s, find, repl string, count int) (string, int) {
 	if find == "" {
 		return s, 0
 	}
