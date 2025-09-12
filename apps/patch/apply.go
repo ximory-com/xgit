@@ -2,29 +2,15 @@ package patch
 
 import (
 	"fmt"
-	"path/filepath"
-
-	"xgit/apps/patch/fileops"
+	"strings"
 )
 
 // XGIT:BEGIN APPLY DISPATCH
-// 将 11 条 file.* 指令全部分发到 fileops 包
-// 约定 fileops 函数签名（若与你现有不一致，把调用名改成你的即可）:
-//   Write(repo, path, body string, logf func(string, ...any)) error
-//   Append(repo, path, body string, logf func(string, ...any)) error
-//   Prepend(repo, path, body string, logf func(string, ...any)) error
-//   Replace(repo, path string, args map[string]string, body string, logf func(string, ...any)) error
-//   Delete(repo, path string, logf func(string, ...any)) error
-//   Move(repo, from, to string, logf func(string, ...any)) error
-//   Chmod(repo, path string, args map[string]string, logf func(string, ...any)) error
-//   EOL(repo, path string, args map[string]string, logf func(string, ...any)) error
-//   Image(repo, path, base64Body string, logf func(string, ...any)) error
-//   Binary(repo, path, base64Body string, logf func(string, ...any)) error
-//   Diff(repo string, body string, logf func(string, ...any)) error
+// 将 11 条 file.* 指令全部分发到同包内实现（fileops/*.go 应为 package patch）
 func ApplyOnce(logger *DualLogger, repo string, patch *Patch) {
 	log := logger.Log
 
-	// 事务前清理（保留你现有行为）
+	// 清理工作区（保持原有行为）
 	log("ℹ️ 自动清理工作区：reset --hard / clean -fd")
 	_, _, _ = shell("git", "-C", repo, "reset", "--hard")
 	_, _, _ = shell("git", "-C", repo, "clean", "-fd")
@@ -36,59 +22,37 @@ func ApplyOnce(logger *DualLogger, repo string, patch *Patch) {
 
 		switch op.Cmd {
 		case "write":
-			if err := fileops.Write(repo, op.Path, op.Body, log); err != nil {
-				log("❌ %s 失败：%v", tag, err); return
-			}
+			if err := Write(repo, op.Path, op.Body, log); err != nil { log("❌ %s 失败：%v", tag, err); return }
 			changed = true
 		case "append":
-			if err := fileops.Append(repo, op.Path, op.Body, log); err != nil {
-				log("❌ %s 失败：%v", tag, err); return
-			}
+			if err := Append(repo, op.Path, op.Body, log); err != nil { log("❌ %s 失败：%v", tag, err); return }
 			changed = true
 		case "prepend":
-			if err := fileops.Prepend(repo, op.Path, op.Body, log); err != nil {
-				log("❌ %s 失败：%v", tag, err); return
-			}
+			if err := Prepend(repo, op.Path, op.Body, log); err != nil { log("❌ %s 失败：%v", tag, err); return }
 			changed = true
 		case "replace":
-			if err := fileops.Replace(repo, op.Path, op.Args, op.Body, log); err != nil {
-				log("❌ %s 失败：%v", tag, err); return
-			}
+			if err := Replace(repo, op.Path, op.Args, op.Body, log); err != nil { log("❌ %s 失败：%v", tag, err); return }
 			changed = true
 		case "delete":
-			if err := fileops.Delete(repo, op.Path, log); err != nil {
-				log("❌ %s 失败：%v", tag, err); return
-			}
+			if err := Delete(repo, op.Path, log); err != nil { log("❌ %s 失败：%v", tag, err); return }
 			changed = true
 		case "move":
-			if err := fileops.Move(repo, op.Path, op.To, log); err != nil {
-				log("❌ %s 失败：%v", tag, err); return
-			}
+			if err := Move(repo, op.Path, op.To, log); err != nil { log("❌ %s 失败：%v", tag, err); return }
 			changed = true
 		case "chmod":
-			if err := fileops.Chmod(repo, op.Path, op.Args, log); err != nil {
-				log("❌ %s 失败：%v", tag, err); return
-			}
+			if err := Chmod(repo, op.Path, op.Args, log); err != nil { log("❌ %s 失败：%v", tag, err); return }
 			changed = true
 		case "eol":
-			if err := fileops.EOL(repo, op.Path, op.Args, log); err != nil {
-				log("❌ %s 失败：%v", tag, err); return
-			}
+			if err := EOL(repo, op.Path, op.Args, log); err != nil { log("❌ %s 失败：%v", tag, err); return }
 			changed = true
 		case "image":
-			if err := fileops.Image(repo, op.Path, op.Body, log); err != nil {
-				log("❌ %s 失败：%v", tag, err); return
-			}
+			if err := Image(repo, op.Path, op.Body, log); err != nil { log("❌ %s 失败：%v", tag, err); return }
 			changed = true
 		case "binary":
-			if err := fileops.Binary(repo, op.Path, op.Body, log); err != nil {
-				log("❌ %s 失败：%v", tag, err); return
-			}
+			if err := Binary(repo, op.Path, op.Body, log); err != nil { log("❌ %s 失败：%v", tag, err); return }
 			changed = true
 		case "diff":
-			if err := fileops.Diff(repo, op.Body, log); err != nil {
-				log("❌ %s 失败：%v", tag, err); return
-			}
+			if err := Diff(repo, op.Body, log); err != nil { log("❌ %s 失败：%v", tag, err); return }
 			changed = true
 		default:
 			log("⚠️ 未识别命令：%s（忽略）", tag)
@@ -110,7 +74,6 @@ func ApplyOnce(logger *DualLogger, repo string, patch *Patch) {
 		return
 	}
 
-	// 组装提交信息（沿用调用方传进来的 commit/author；保持你现有提交逻辑）
 	commit := "chore: apply patch"
 	author := "XGit Bot <bot@xgit.local>"
 	log("ℹ️ 提交说明：%s", commit)
