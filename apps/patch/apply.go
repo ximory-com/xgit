@@ -138,7 +138,7 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 func ApplyOnce(logger *DualLogger, repo string, patch *Patch) {
 	log := logger.Log
 
- 用事务包装整个应用过程
+
 	_ = WithGitTxn(repo, func(format string, a ...any) { logger.Log(format, a...) }, func() error {
 		log("ℹ️ 自动清理工作区：reset --hard / clean -fd")
 		_, _, _ = shell("git", "-C", repo, "reset", "--hard")
