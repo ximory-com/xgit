@@ -128,10 +128,31 @@ func FileReplace(
 		}
 	}
 
-	if replaced == 0 {
-		logfSafe(logf, "⚠️ file.replace 无匹配：%s（范围 %d-%d）", rel, start, end)
-		return nil
-	}
+    if replaced == 0 {
+        // 仅确保 EOF 换行：即使没有文本替换，也要生效
+        if ensureEOFNewline && !strings.HasSuffix(text, "\n") {
+            // 恢复原 EOL 风格并原子写入
+            out := text + "\n"
+            if isCRLF { out = toCRLF(out) }
+
+            dir := filepath.Dir(abs)
+            tmpf, err := os.CreateTemp(dir, ".xgit_replace_*")
+            if err != nil { logfSafe(logf, "❌ file.replace 临时文件失败：%v", err); return err }
+            tmp := tmpf.Name()
+            defer os.Remove(tmp)
+            if _, err := io.WriteString(tmpf, out); err != nil { tmpf.Close(); return err }
+            if err := tmpf.Sync(); err != nil { tmpf.Close(); return err }
+            if err := tmpf.Close(); err != nil { return err }
+            _ = os.Chmod(tmp, mode)
+            if err := os.Rename(tmp, abs); err != nil { logfSafe(logf, "❌ file.replace 覆盖失败：%v", err); return err }
+            if !mtime.IsZero() { _ = os.Chtimes(abs, time.Now(), mtime) }
+
+            logfSafe(logf, "✏️ file.replace 确保末尾换行：%s", rel)
+            return nil
+        }
+        logfSafe(logf, "⚠️ file.replace 无匹配：%s（范围 %d-%d）", rel, start, end)
+        return nil
+    }
 
 	// 拼回全文
 	var builder strings.Builder
