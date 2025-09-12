@@ -158,12 +158,14 @@ func ApplyOnce(logger *DualLogger, repo string, patch *Patch) {
 	}
 
 	// 有改动则提交
+	// 在检查是否有改动之前统一 stage 一下（包含删除等）
+	_, _, _ = shell("git", "-C", repo, "add", "-A")
 	names, _, _ := shell("git", "-C", repo, "diff", "--cached", "--name-only")
 	if strings.TrimSpace(names) == "" {
-		log("ℹ️ 无改动需要提交。")
-		log("✅ 本次补丁完成")
+		logger.Log("ℹ️ 无改动需要提交。")
+		logger.Log("✅ 本次补丁完成")
 		return
-	}
+	}	
 
 	commit := "chore: apply patch"
 	author := "XGit Bot <bot@xgit.local>"

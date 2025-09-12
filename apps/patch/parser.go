@@ -47,8 +47,8 @@ func ParsePatch(data string, eof string) (*Patch, error) {
 		p          = &Patch{Ops: make([]*FileOp, 0, 64)}
 		inBody     = false
 		cur        *FileOp
-		// 统一头部：=== file.<cmd>: <header> ===
-		reHead     = regexp.MustCompile(`^===\s*file\.([a-zA-Z0-9_]+)\s*:\s*(.*?)\s*===\s*$`)
+		// 统一头部：=== <kind>.<cmd>: <header> ===
+		reHead 	   = regexp.MustCompile(`^===\s*([a-z]+(?:\.[a-z_]+)?)\s*:\s*(.*?)\s*===\s*$`)
 		reMoveSep  = regexp.MustCompile(`\s*->\s*`)
 	)
 
@@ -62,48 +62,60 @@ func ParsePatch(data string, eof string) (*Patch, error) {
 		cur = &FileOp{Cmd: strings.ToLower(cmd), Args: map[string]string{}}
 
 		h := strings.TrimSpace(header)
-		switch cur.Cmd {
-		case "move":
-			parts := reMoveSep.Split(h, 2)
-			if len(parts) == 2 {
-				cur.Path = strings.TrimSpace(parts[0])
-				cur.To = strings.TrimSpace(parts[1])
-			} else {
-				cur.Path = h
-			}
-			// move 无体
-			p.Ops = append(p.Ops, cur)
-			cur = nil
-			inBody = false
-		case "delete", "chmod", "eol", "replace":
-			// delete: 只要 path
-			// chmod/eol/replace: header 支持 path 后跟 kv
-			// 先切出 path（首个空格前）
-			path, rest := splitFirstField(h)
-			cur.Path = path
-			kv := parseKVs(rest)
-			if len(kv) > 0 {
-				for k, v := range kv {
-					cur.Args[k] = v
+		kind, action := "", cur.Cmd
+		if i := strings.Index(cur.Cmd, "."); i > -1 {
+			kind = cur.Cmd[:i]
+			action = cur.Cmd[i+1:]
+		} else {
+			// 兼容意外输入（无点），当成单段指令
+			kind = cur.Cmd
+		}
+
+		switch kind {
+		case "file":
+			switch action {
+			case "move":
+				parts := reMoveSep.Split(h, 2)
+				if len(parts) == 2 {
+					cur.Path = strings.TrimSpace(parts[0])
+					cur.To = strings.TrimSpace(parts[1])
+				} else {
+					cur.Path = h
 				}
-			}
-			// delete/ chmod / eol：无体；replace 既可 header 给 replacement，也可 body 给 replacement
-			if cur.Cmd == "replace" {
-				// 需要体？看有没有 to/with 参数；没有则体作为 replacement
-				inBody = (cur.Args["to"] == "" && cur.Args["with"] == "")
-			} else if cur.Cmd == "delete" {
+				// move 无体
 				p.Ops = append(p.Ops, cur)
 				cur = nil
 				inBody = false
-			} else { // chmod/eol
-				p.Ops = append(p.Ops, cur)
-				cur = nil
-				inBody = false
+			case "delete", "chmod", "eol", "replace":
+				// delete: 只要 path
+				// chmod/eol/replace: header 支持 path 后跟 kv
+				// 先切出 path（首个空格前）
+				path, rest := splitFirstField(h)
+				cur.Path = path
+				kv := parseKVs(rest)
+				if len(kv) > 0 {
+					for k, v := range kv {
+						cur.Args[k] = v
+					}
+				}
+				// delete/ chmod / eol：无体；replace 既可 header 给 replacement，也可 body 给 replacement
+				if cur.Cmd == "replace" {
+					// 需要体？看有没有 to/with 参数；没有则体作为 replacement
+					inBody = (cur.Args["to"] == "" && cur.Args["with"] == "")
+				} else if cur.Cmd == "delete" {
+					p.Ops = append(p.Ops, cur)
+					cur = nil
+					inBody = false
+				} else { // chmod/eol
+					p.Ops = append(p.Ops, cur)
+					cur = nil
+					inBody = false
+				}
+			default:
+				// write/append/prepend/image/binary/diff ……需要体
+				cur.Path = h
+				inBody = true
 			}
-		default:
-			// write/append/prepend/image/binary/diff ……需要体
-			cur.Path = h
-			inBody = true
 		}
 	}
 

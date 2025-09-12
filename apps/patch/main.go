@@ -72,14 +72,22 @@ func main() {
 		// watcher
 		w := NewWatcher(patchFile, eofMark, logger)
 
-		var lastHash string
+		lastHash := loadLastHash(baseDir)
 		for {
 			ok, size, h8 := w.StableAndEOF()
 			if ok && h8 != "" && h8 != lastHash {
 				logger.Log("📦 补丁稳定（size=%d md5=%s）→ 准备执行", size, h8)
 
+				data, err := os.ReadFile(patchFile)
+				if err != nil {
+					logger.Log("❌ 读取补丁失败：%v", err)
+					lastHash = h8
+					time.Sleep(700 * time.Millisecond)
+					continue
+				}
+
 				eof := w.EOFMark
-				pt, err := ParsePatch(patchFile, eof)
+				pt, err := ParsePatch(string(data), eof)
 				if err != nil {
 					logger.Log("❌ 解析失败：%v", err)
 					lastHash = h8
@@ -107,6 +115,7 @@ func main() {
 
 				ApplyOnce(logger, repoPath, pt)
 				lastHash = h8
+				saveLastHash(baseDir,lastHash)
 			}
 			time.Sleep(250 * time.Millisecond)
 		}
@@ -155,3 +164,14 @@ func headerRepoName(patchFile string) string {
 	return ""
 }
 // XGIT:END HEADER-REPO
+func saveLastHash(baseDir, hash string) {
+    os.WriteFile(filepath.Join(baseDir, ".lastpatch"), []byte(hash), 0644)
+}
+
+func loadLastHash(baseDir string) string {
+    data, err := os.ReadFile(filepath.Join(baseDir, ".lastpatch"))
+    if err != nil {
+        return ""
+    }
+    return strings.TrimSpace(string(data))
+}
