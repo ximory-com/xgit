@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"path/filepath"
 
 	"xgit/apps/patch/preflight"
 )
@@ -35,15 +36,29 @@ func runPreflightDryRun(repo string, patch *Patch, logger *DualLogger) error {
 	// 3) 收集改动文件
 	out, _ := runCmdOut("git", "-C", shadow, "status", "--porcelain")
 	changed := make([]string, 0, 32)
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	for _, raw := range strings.Split(out, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || len(line) <= 3 {
 			continue
 		}
-		// 格式：XY<space>path
-		if len(line) > 3 {
-			changed = append(changed, strings.TrimSpace(line[3:]))
+		payload := strings.TrimSpace(line[3:])
+
+		// R  old -> new 只取 new
+		if idx := strings.Index(payload, "->"); idx >= 0 {
+			payload = strings.TrimSpace(payload[idx+2:])
 		}
+
+		// 跳过明显目录（?? dir/）
+		if strings.HasSuffix(payload, "/") {
+			continue
+		}
+		// 以文件系统为准再过滤目录
+		full := filepath.Join(shadow, payload)
+		if fi, err := os.Stat(full); err == nil && fi.IsDir() {
+			continue
+		}
+
+		changed = append(changed, payload)
 	}
 	if len(changed) == 0 {
 		logf("ℹ️ 预检：无文件变更")
