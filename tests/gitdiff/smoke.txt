@@ -1,4 +1,0 @@
-Hello XGit
-This is a smoke test.
-v2
-Appended.
