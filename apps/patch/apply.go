@@ -146,10 +146,27 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 		return gitops.Diff(repo, op.Body, logger)
 
 	case "git.revert":
-		return gitops.Revert(repo, op.Body, logger)
+		// 接口：Revert(repo, spec, strategy, logger)
+		// spec：commit 或 commit..commit（优先 @spec，兜底用 Body）
+		// strategy：默认 "abort" 或 "merge" 等
+		spec := strings.TrimSpace(argStr(op.Args, "spec", op.Body))
+		if spec == "" {
+			return errors.New("git.revert: missing spec")
+		}
+		strategy := strings.TrimSpace(argStr(op.Args, "strategy", "abort"))
+		return gitops.Revert(repo, spec, strategy, logger)
 
 	case "git.tag":
-		return gitops.Tag(repo, op.Body, logger)
+		// 接口：Tag(repo, name, ref, message, annotate, force, logger)
+		name := strings.TrimSpace(argStr(op.Args, "name", ""))
+		if name == "" {
+			return errors.New("git.tag: missing name")
+		}
+		ref := strings.TrimSpace(argStr(op.Args, "ref", "HEAD"))
+		message := argStr(op.Args, "message", "")
+		annotate := argBool(op.Args, "annotate", message != "")
+		force := argBool(op.Args, "force", false)
+		return gitops.Tag(repo, name, ref, message, annotate, force, logger)
 
 	default:
 		return errors.New("未知指令: " + op.Cmd)
