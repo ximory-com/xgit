@@ -78,8 +78,6 @@ func ParsePatch(data string, eof string) (*Patch, error) {
 		if !ok {
 			return fmt.Errorf("path/name 必须用双引号包裹：%q", header)
 		}
-
-		// 仅识别 file.*；未知种类直接报错（保持现有风格）
 		kind, action := "", cmd
 		if i := strings.Index(cmd, "."); i > -1 {
 			kind = cmd[:i]
@@ -87,14 +85,23 @@ func ParsePatch(data string, eof string) (*Patch, error) {
 		} else {
 			kind = cmd
 		}
-		if kind != "file" {
-			return fmt.Errorf("未知种类: %s", kind)
-		}
-		switch action {
-		case "write", "append", "prepend", "replace", "delete", "move", "chmod", "eol", "image", "binary", "diff":
-			// ok
+		switch kind {
+		case "file":
+			switch action {
+			case "write", "append", "prepend", "replace", "delete", "move", "chmod", "eol", "image", "binary", "diff":
+				// ok
+			default:
+				return fmt.Errorf("未知指令: %s", cmd)
+			}
+		case "git":
+			switch action {
+			case "diff", "revert", "tag":
+				// ok
+			default:
+				return fmt.Errorf("未知指令: %s", cmd)
+			}
 		default:
-			return fmt.Errorf("未知指令: %s", cmd)
+			return fmt.Errorf("未知种类: %s", kind)
 		}
 
 		cur = &FileOp{
