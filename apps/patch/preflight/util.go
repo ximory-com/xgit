@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"strings"
 	"path/filepath"
 	"time"
 )
@@ -45,4 +46,18 @@ func atomicWrite(abs string, data []byte, mode os.FileMode, mtime time.Time) err
 		_ = os.Chtimes(abs, time.Now(), mtime)
 	}
 	return nil
+}
+
+// DetectLangByExt 返回文件语言标签，供预检路由使用。
+// 需要的话后续再扩展其它语言/后缀。
+func DetectLangByExt(path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".go":
+		return "go"
+	case ".json":
+		return "json"
+	default:
+		return ""
+	}
 }

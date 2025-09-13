@@ -8,9 +8,11 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"path/filepath"
 
 	"xgit/apps/patch/fileops"
 	"xgit/apps/patch/gitops"
+	"xgit/apps/patch/preflight"
 )
 
 // ========== 小工具：从 map 中读取参数（带默认值） ==========
@@ -174,13 +176,46 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 }
 // XGIT:END APPLY DISPATCH
 
+// —— 用下面这个函数整体替换你当前的 ApplyOnce ——
+
 // XGIT:BEGIN APPLY ONCE
 // ApplyOnce：用事务包裹“执行阶段”，成功后再统一提交/推送
+// 同时把日志“截断写入 repo/patch.log”（仅保留最近一次），并与控制台同步输出。
 func ApplyOnce(logger *DualLogger, repo string, patch *Patch) {
-	log := logger.Log
-	logf := func(format string, a ...any) { if logger != nil { logger.Log(format, a...) } }
+	// 1) 打开/截断 patch.log
+	logPath := filepath.Join(repo, "patch.log")
+	f, ferr := os.Create(logPath) // os.Create 会截断旧内容
+	if ferr != nil {
+		if logger != nil {
+			logger.Log("⚠️ 无法写入 patch.log：%v（将仅输出到控制台）", ferr)
+		}
+	}
 
-	// 1) 事务阶段：逐条执行 file.*，任一失败则回滚到补丁前 HEAD
+	// 简单的双写封装：既写控制台，也写文件
+	writeFile := func(s string) {
+		if f != nil {
+			_, _ = f.WriteString(s)
+			if !strings.HasSuffix(s, "\n") {
+				_, _ = f.WriteString("\n")
+			}
+		}
+	}
+	log := func(format string, a ...any) {
+		msg := fmt.Sprintf(format, a...)
+		if logger != nil {
+			logger.Log("%s", msg)
+		}
+		writeFile(msg)
+	}
+	logf := func(format string, a ...any) { log(format, a...) }
+	defer func() { if f != nil { _ = f.Close() } }()
+
+	if err := runPreflightDryRun(repo, patch, logger); err != nil {
+		log("❌ 预检失败：%v", err)
+		return
+	}
+
+	// 2) 事务阶段：逐条执行 file.*，任一失败则回滚到补丁前 HEAD
 	err := WithGitTxn(repo, logf, func() error {
 		for i, op := range patch.Ops {
 			tag := fmt.Sprintf("%s #%d", op.Cmd, i+1)
@@ -197,13 +232,13 @@ func ApplyOnce(logger *DualLogger, repo string, patch *Patch) {
 		return
 	}
 
-	// 2) 成功后统一 stage/commit/push（不置于事务内）
+	// 3) 成功后统一 stage/commit/push（不置于事务内）
 	_ = runCmd("git", "-C", repo, "add", "-A")
 
 	names, _ := runCmdOut("git", "-C", repo, "diff", "--cached", "--name-only")
 	if strings.TrimSpace(names) == "" {
-		logger.Log("ℹ️ 无改动需要提交。")
-		logger.Log("✅ 本次补丁完成")
+		log("ℹ️ 无改动需要提交。")
+		log("✅ 本次补丁完成")
 		return
 	}
 
@@ -284,3 +319,93 @@ func WithGitTxn(repo string, logf func(string, ...any), fn func() error) error {
 	return nil
 }
 // XGIT:END GIT_TXN_HELPERS
+
+func runPreflightDryRun(repo string, patch *Patch, logger *DualLogger) error {
+    logf := func(format string, a ...any) { if logger != nil { logger.Log(format, a...) } }
+
+    // 1) 建影子工作区
+    shadow, err := os.MkdirTemp("", "xgit_preflight_*")
+    if err != nil {
+        return fmt.Errorf("创建影子工作区失败：%w", err)
+    }
+    defer os.RemoveAll(shadow)
+
+    if err := runCmd("git", "-C", repo, "worktree", "add", "--detach", shadow, "HEAD"); err != nil {
+        return fmt.Errorf("git worktree add 失败：%w", err)
+    }
+    defer func() { _ = runCmd("git", "-C", repo, "worktree", "remove", "--force", shadow) }()
+
+    // 2) 在影子上“干跑”补丁（不 commit，不 push）
+    for i, op := range patch.Ops {
+        tag := fmt.Sprintf("%s #%d", op.Cmd, i+1)
+        if e := applyOp(shadow, op, logger); e != nil {
+            logf("❌ 预检执行失败（影子）%s：%v", tag, e)
+            return e
+        }
+    }
+
+    // 3) 收集改动文件
+    out, _ := runCmdOut("git", "-C", shadow, "status", "--porcelain")
+    changed := make([]string, 0, 32)
+    for _, line := range strings.Split(out, "\n") {
+        line = strings.TrimSpace(line)
+        if line == "" { continue }
+        // 格式：XY<space>path
+        if len(line) > 3 {
+            changed = append(changed, strings.TrimSpace(line[3:]))
+        }
+    }
+    if len(changed) == 0 {
+        logf("ℹ️ 预检：无文件变更")
+        return nil
+    }
+
+    // 4) 调用 preflight 注册中心（你已有 preflight/registry.go）
+    if err := preflightRun(shadow, changed, logger); err != nil {
+        return err
+    }
+
+    logf("✅ 预检通过（文件数：%d）", len(changed))
+    return nil
+}
+
+
+// 预检：对 files 中的每个文件选择合适的 Runner 并执行
+func preflightRun(repo string, files []string, logger *DualLogger) error {
+	// 日志函数
+	logf := func(format string, a ...any) {
+		if logger != nil {
+			logger.Log(format, a...)
+		}
+	}
+
+	for _, f := range files {
+		rel := strings.TrimSpace(f)
+		if rel == "" {
+			continue
+		}
+
+		// 仅用于日志的语言提示（基于扩展名）
+		lang := preflight.DetectLangByExt(rel)
+		if lang == "" {
+			lang = "unknown"
+		}
+		logf("🧪 预检 %s (%s)", rel, lang)
+
+		// 选择并运行对应的预检器
+		if r := preflight.Lookup(rel); r != nil {
+			changed, err := r.Run(repo, rel, logf)
+			if err != nil {
+				return fmt.Errorf("预检失败 %s: %w", rel, err)
+			}
+			if changed {
+				logf("🛠️ 预检已修改 %s", rel)
+			} else {
+				logf("✔ 预检通过，无需修改：%s", rel)
+			}
+		} else {
+			logf("ℹ️ 无匹配的预检器：%s", rel)
+		}
+	}
+	return nil
+}

@@ -51,3 +51,13 @@ func RunAll(repo string, files []string, logf Logf) (bool, error) {
 	}
 	return anyChanged, nil
 }
+// Lookup 根据文件路径找到第一个匹配的 Runner
+func Lookup(path string) Runner {
+	for _, r := range runners {
+		if r.Match(path) {
+			return r
+		}
+	}
+	return nil
+}
+
