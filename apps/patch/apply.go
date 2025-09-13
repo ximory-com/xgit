@@ -137,7 +137,8 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 		return fileops.FileBinary(repo, op.Path, string(bin), logger)
 
 	case "file.diff":
-		return fileops.FileDiff(repo, op.Body, logger)
+		// 传入 header 的路径，便于 diff.go 在缺少文件头时自动包装
+		return fileops.FileDiff(repo, op.Path, op.Body, logger)
 
 	default:
 		return errors.New("未知指令: " + op.Cmd)
