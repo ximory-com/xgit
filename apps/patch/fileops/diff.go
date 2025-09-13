@@ -1,3 +1,4 @@
+// apps/patch/fileops/diff.go
 package fileops
 
 import (
@@ -22,10 +23,10 @@ import (
 // - 使用 --3way 可在存在轻微偏移或上下文变化时更稳；
 // - 使用 --reject 避免“全盘失败”，若出现 .rej 代表部份 hunk 无法应用；我们会将此视为失败并返回可读错误；
 // - 调用方（ApplyOnce）处在事务里，失败将回滚。
-func FileDiff(repo string, diffText string, logger *DualLogger) error {
+func FileDiff(repo string, diffText string, logger DualLogger) error {
 	log := func(format string, a ...any) {
 		if logger != nil {
-			(*logger).Log(format, a...)
+			logger.Log(format, a...)
 		}
 	}
 
