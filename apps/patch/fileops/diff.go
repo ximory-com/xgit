@@ -25,7 +25,7 @@ import (
 func FileDiff(repo string, diffText string, logger *DualLogger) error {
 	log := func(format string, a ...any) {
 		if logger != nil {
-			logger.Log(format, a...)
+			(*logger).Log(format, a...)
 		}
 	}
 
