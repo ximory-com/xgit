@@ -1,4 +1,3 @@
-// apps/patch/fileops/diff.go
 package fileops
 
 import (
@@ -11,29 +10,36 @@ import (
 	"strings"
 )
 
-// FileDiff 使用 `git apply` 在 repo 上应用 unified diff / git diff 格式的补丁文本。
-// 行为：
-// 1) 将传入 diff 文本写入 repo 目录下的临时 .patch 文件
-// 2) 依次尝试（注意：绝不把 --reject 与 --3way 同时使用）：
-//    (a) git -C <repo> apply --index --3way --whitespace=nowarn <patch>
-//    (b) git -C <repo> apply        --3way --whitespace=nowarn <patch>
-//    (c) git -C <repo> apply --reject        --whitespace=nowarn <patch>
-//    (d) git -C <repo> apply                     --whitespace=nowarn <patch>
-// 3) 任一步成功即返回；若产生 .rej 文件则视为失败并回滚（由外层事务处理）。
-//
-// 说明：
-// - --3way 能在存在上下文偏移时更稳；
-// - --reject 可保留无法合并的 hunk 为 .rej，便于人工处理；但与 --3way 互斥；
-// - 调用方（ApplyOnce）处在事务里，失败将回滚。
-func FileDiff(repo string, diffText string, logger DualLogger) error {
+// FileDiff 使用 `git apply` 在 repo 上应用统一 diff；支持“仅 hunk”的单文件补丁：
+// 若 diffText 未包含 '--- ' / '+++ ' 文件头且 defaultPath 非空，则自动包裹最小文件头。
+func FileDiff(repo string, defaultPath string, diffText string, logger DualLogger) error {
 	log := func(format string, a ...any) {
 		if logger != nil {
 			logger.Log(format, a...)
 		}
 	}
 
+	diffText = strings.ReplaceAll(diffText, "\r\n", "\n")
+	diffText = strings.ReplaceAll(diffText, "\r", "\n")
 	if strings.TrimSpace(diffText) == "" {
 		return errors.New("file.diff: 空 diff")
+	}
+
+	// 自动包裹：没有文件头的 header-less hunk，且我们拿到了唯一文件路径
+	hasHeader := strings.Contains(diffText, "\n--- ") || strings.HasPrefix(diffText, "--- ")
+	hasHeader = hasHeader && (strings.Contains(diffText, "\n+++ ") || strings.HasPrefix(diffText, "+++ "))
+	if !hasHeader {
+		if strings.TrimSpace(defaultPath) == "" {
+			return errors.New("file.diff: 缺少文件头（---/+++）且未提供 header 路径，无法自动判断目标文件")
+		}
+		rel := filepath.ToSlash(defaultPath)
+		header := fmt.Sprintf("--- a/%s\n+++ b/%s\n", rel, rel)
+		// 确保 hunk 前后有换行
+		body := strings.TrimLeft(diffText, "\n")
+		if !strings.HasPrefix(body, "@@") && !strings.Contains(body, "\n@@") {
+			return errors.New("file.diff: 看起来不是有效的 hunk（缺少 @@ 行）")
+		}
+		diffText = header + body
 	}
 
 	// 写入临时补丁文件（放在 repo 内，避免相对路径问题）
@@ -78,7 +84,7 @@ func FileDiff(repo string, diffText string, logger DualLogger) error {
 	steps := [][]string{
 		{"--index", "--3way", "--whitespace=nowarn", tmp},
 		{"--3way", "--whitespace=nowarn", tmp},
-		{"--reject", "--whitespace=nowarn", tmp}, // 与 --3way 互斥
+		{"--reject", "--whitespace=nowarn", tmp},
 		{"--whitespace=nowarn", tmp},
 	}
 
