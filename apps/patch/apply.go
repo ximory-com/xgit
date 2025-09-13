@@ -112,35 +112,7 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 	case "file.eol":
 		style := strings.ToLower(strings.TrimSpace(argStr(op.Args, "style", "lf")))
 		ensureNL := argBool(op.Args, "ensure_nl", true)
-		return fileops.FileEOL(repo, op.Path, style, ensureNL, logger)
-
-	case "file.image":
-		raw := strings.TrimSpace(op.Body)
-		if raw == "" {
-			return errors.New("file.image: 缺少 base64 内容")
-		}
-		bin, err := base64.StdEncoding.DecodeString(raw)
-		if err != nil {
-			return errors.New("file.image: base64 解码失败")
-		}
-		return fileops.FileImage(repo, op.Path, string(bin), logger)
-
-	case "file.binary":
-		raw := strings.TrimSpace(op.Body)
-		if raw == "" {
-			return errors.New("file.binary: 缺少 base64 内容")
-		}
-		bin, err := base64.StdEncoding.DecodeString(raw)
-		if err != nil {
-			return errors.New("file.binary: base64 解码失败")
-		}
-		return fileops.FileBinary(repo, op.Path, string(bin), logger)
-
-	case "file.diff":
-		return fileops.FileDiff(repo, op.Body, logger)
-
-	default:
-		return errors.New("未知指令: " + op.Cmd)
+		return fileops.FileEOL(repo, op.Path, style, ensureNL, logger)		return errors.New("未知指令: " + op.Cmd)
 	}
 }
 // XGIT:END APPLY DISPATCH
