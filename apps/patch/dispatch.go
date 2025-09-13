@@ -102,7 +102,7 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 		return fileops.FileBinary(repo, op.Path, string(bin), logger)
 
 	case "file.diff":
-		return fileops.FileDiff(repo, op.Path, op.Body, logger)
+    	return errors.New("file.diff: 临时禁用; 使用 file.write 或 git.diff")
 
 	// ========== gitops 系列 ==========
 	case "git.diff":
