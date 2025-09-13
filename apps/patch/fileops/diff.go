@@ -14,14 +14,16 @@ import (
 // FileDiff 使用 `git apply` 在 repo 上应用 unified diff / git diff 格式的补丁文本。
 // 行为：
 // 1) 将传入 diff 文本写入 repo 目录下的临时 .patch 文件
-// 2) 依次尝试：
-//    (a) git apply --index --3way --reject --whitespace=nowarn
-//    (b) git apply        --3way --reject --whitespace=nowarn
-// 3) 成功则记录日志并返回 nil；失败会收集 git 输出与 .rej 线索返回 error
+// 2) 依次尝试（注意：绝不把 --reject 与 --3way 同时使用）：
+//    (a) git -C <repo> apply --index --3way --whitespace=nowarn <patch>
+//    (b) git -C <repo> apply        --3way --whitespace=nowarn <patch>
+//    (c) git -C <repo> apply --reject        --whitespace=nowarn <patch>
+//    (d) git -C <repo> apply                     --whitespace=nowarn <patch>
+// 3) 任一步成功即返回；若产生 .rej 文件则视为失败并回滚（由外层事务处理）。
 //
 // 说明：
-// - 使用 --3way 可在存在轻微偏移或上下文变化时更稳；
-// - 使用 --reject 避免“全盘失败”，若出现 .rej 代表部份 hunk 无法应用；我们会将此视为失败并返回可读错误；
+// - --3way 能在存在上下文偏移时更稳；
+// - --reject 可保留无法合并的 hunk 为 .rej，便于人工处理；但与 --3way 互斥；
 // - 调用方（ApplyOnce）处在事务里，失败将回滚。
 func FileDiff(repo string, diffText string, logger DualLogger) error {
 	log := func(format string, a ...any) {
@@ -34,7 +36,7 @@ func FileDiff(repo string, diffText string, logger DualLogger) error {
 		return errors.New("file.diff: 空 diff")
 	}
 
-	// 写入临时补丁文件（放在 repo 内，避免路径问题）
+	// 写入临时补丁文件（放在 repo 内，避免相对路径问题）
 	dir := repo
 	if dir == "" {
 		dir = "."
@@ -61,33 +63,34 @@ func FileDiff(repo string, diffText string, logger DualLogger) error {
 
 	log("📄 file.diff 正在应用补丁：%s", filepath.Base(tmp))
 
-	// 尝试序列：优先带 --index，然后不带 --index
-	attempts := [][]string{
-		{"apply", "--index", "--3way", "--reject", "--whitespace=nowarn", tmp},
-		{"apply", "--3way", "--reject", "--whitespace=nowarn", tmp},
+	try := func(args ...string) error {
+		cmd := exec.Command("git", append([]string{"-C", repo, "apply"}, args...)...)
+		var buf bytes.Buffer
+		cmd.Stdout = &buf
+		cmd.Stderr = &buf
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("git apply %v 失败：%w\n%s", args, err, buf.String())
+		}
+		return nil
 	}
 
-	var firstErr error
-	for i, args := range attempts {
-		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
-		var out bytes.Buffer
-		cmd.Stdout = &out
-		cmd.Stderr = &out
+	// 依次降级尝试（不混用 --reject 与 --3way）
+	steps := [][]string{
+		{"--index", "--3way", "--whitespace=nowarn", tmp},
+		{"--3way", "--whitespace=nowarn", tmp},
+		{"--reject", "--whitespace=nowarn", tmp}, // 与 --3way 互斥
+		{"--whitespace=nowarn", tmp},
+	}
 
-		if err := cmd.Run(); err != nil {
-			if firstErr == nil {
-				firstErr = fmt.Errorf("git %s 失败：%v\n%s", strings.Join(args, " "), err, out.String())
-			}
-			log("⚠️ git %s 失败（尝试 #%d）：%v", strings.Join(args, " "), i+1, err)
+	var lastErr error
+	for i, s := range steps {
+		if err := try(s...); err != nil {
+			lastErr = err
+			log("⚠️ %s", err.Error())
 			continue
 		}
-
-		// 成功
-		log("✅ file.diff 已应用（尝试 #%d 成功）", i+1)
-
-		// 检查是否产生 .rej（有 .rej 说明存在未能自动合入的 hunk）
-		rejs, _ := findRejects(repo)
-		if len(rejs) > 0 {
+		// 成功；若出现 .rej 仍视为失败（需要人工处理）
+		if rejs, _ := findRejects(repo); len(rejs) > 0 {
 			var sb strings.Builder
 			for _, r := range rejs {
 				sb.WriteString(" - ")
@@ -96,22 +99,22 @@ func FileDiff(repo string, diffText string, logger DualLogger) error {
 			}
 			return fmt.Errorf("file.diff: 存在未能应用的 hunk（生成 .rej）：\n%s", sb.String())
 		}
+		log("✏️ file.diff 完成（策略 #%d）", i+1)
 		return nil
 	}
 
-	// 两次尝试都失败，补充 .rej 线索（如果有）
-	rejs, _ := findRejects(repo)
-	if len(rejs) > 0 {
+	// 全部失败，补充 .rej 线索（如果有）
+	if rejs, _ := findRejects(repo); len(rejs) > 0 {
 		var sb strings.Builder
 		for _, r := range rejs {
 			sb.WriteString(" - ")
 			sb.WriteString(r)
 			sb.WriteString("\n")
 		}
-		return fmt.Errorf("%v\nfile.diff: 同时检测到 .rej 文件（可能是上下文不匹配）：\n%s", firstErr, sb.String())
+		return fmt.Errorf("file.diff: 所有策略失败；检测到 .rej：\n%s\n最后错误：%v", sb.String(), lastErr)
 	}
-	if firstErr != nil {
-		return firstErr
+	if lastErr != nil {
+		return lastErr
 	}
 	return errors.New("file.diff: git apply 失败（未知原因）")
 }
@@ -124,7 +127,6 @@ func findRejects(repo string) ([]string, error) {
 			return nil
 		}
 		if d.IsDir() {
-			// 适度跳过 .git
 			if filepath.Base(p) == ".git" {
 				return filepath.SkipDir
 			}
