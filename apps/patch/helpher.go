@@ -63,3 +63,26 @@ func WithGitTxn(repo string, logf func(string, ...any), fn func() error) error {
 	return nil
 }
 
+func collectChangedFiles(repo string) ([]string, error) {
+    out, err := runCmdOut("git", "-C", repo, "status", "--porcelain")
+    if err != nil {
+        return nil, err
+    }
+    files := make([]string, 0, 32)
+    for _, line := range strings.Split(out, "\n") {
+        line = strings.TrimSpace(line)
+        if line == "" {
+            continue
+        }
+        // 格式：XY<space>path（可能包含重命名 -> 取右侧路径）
+        if len(line) > 3 {
+            p := strings.TrimSpace(line[3:])
+            // 处理类似 "R  old -> new"
+            if i := strings.Index(p, " -> "); i >= 0 {
+                p = strings.TrimSpace(p[i+4:])
+            }
+            files = append(files, p)
+        }
+    }
+    return files, nil
+}

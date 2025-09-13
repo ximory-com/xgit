@@ -44,6 +44,7 @@ func ApplyOnce(logger *DualLogger, repo string, patch *Patch) {
 
 	// 2) 事务阶段
 	err := WithGitTxn(repo, logf, func() error {
+		// 先应用所有指令
 		for i, op := range patch.Ops {
 			tag := fmt.Sprintf("%s #%d", op.Cmd, i+1)
 			if e := applyOp(repo, op, logger); e != nil {
@@ -52,6 +53,20 @@ func ApplyOnce(logger *DualLogger, repo string, patch *Patch) {
 			}
 			log("✅ %s 成功", tag)
 		}
+
+		// 再收集本次改动并在“真实仓库”跑预检（失败则回滚）
+		changed, _ := collectChangedFiles(repo)
+		if len(changed) > 0 {
+			logf("🧪 预检（真实仓库）：%d 个文件", len(changed))
+			if err := preflightRun(repo, changed, logger); err != nil {
+				logf("❌ 预检失败：%v", err)
+				return err
+			}
+			logf("✅ 预检通过")
+		} else {
+			logf("ℹ️ 预检：无文件变更")
+		}
+
 		return nil
 	})
 	if err != nil {
