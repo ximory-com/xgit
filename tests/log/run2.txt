@@ -1,0 +1,2 @@
+Run #2
+After this patch, patch.log should only contain the logs of this run.
