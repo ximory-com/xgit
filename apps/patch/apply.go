@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"xgit/apps/patch/fileops"
+	"xgit/apps/patch/gitops"
 )
 
 // ========== 小工具：从 map 中读取参数（带默认值） ==========
@@ -139,6 +140,16 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 	case "file.diff":
 		// 传入 header 的路径，便于 diff.go 在缺少文件头时自动包装
 		return fileops.FileDiff(repo, op.Path, op.Body, logger)
+
+	// ========== gitops 系列 ==========
+	case "git.diff":
+		return gitops.Diff(repo, op.Body, logger)
+
+	case "git.revert":
+		return gitops.Revert(repo, op.Body, logger)
+
+	case "git.tag":
+		return gitops.Tag(repo, op.Body, logger)
 
 	default:
 		return errors.New("未知指令: " + op.Cmd)
