@@ -1,3 +1,4 @@
+// apps/patch/logging.go
 // XGIT:BEGIN PACKAGE
 package main
 // XGIT:END PACKAGE
@@ -21,6 +22,10 @@ type DualLogger struct {
 }
 
 func NewDualLogger(patchDir string) (*DualLogger, error) {
+	// 确保目录存在
+	if err := os.MkdirAll(patchDir, 0755); err != nil {
+		return nil, err
+	}
 	logPath := filepath.Join(patchDir, "patch.log")
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	if err != nil {
@@ -31,10 +36,18 @@ func NewDualLogger(patchDir string) (*DualLogger, error) {
 	return d, nil
 }
 
-func (d *DualLogger) Close() { if d != nil && d.File != nil { _ = d.File.Close() } }
+func (d *DualLogger) Close() {
+	if d == nil || d.File == nil {
+		return
+	}
+	_ = d.File.Close()
+}
 
 // 导出方法
 func (d *DualLogger) Log(format string, a ...any) {
+	if d == nil || d.w == nil {
+		return
+	}
 	ts := time.Now().Format("2006-01-02 15:04:05")
 	fmt.Fprintf(d.w, "%s %s\n", ts, fmt.Sprintf(format, a...))
 }

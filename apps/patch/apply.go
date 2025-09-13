@@ -1,197 +1,23 @@
 package main
 
 import (
-	"encoding/base64"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
-	"strconv"
-	"strings"
 	"path/filepath"
+	"strings"
 
-	"xgit/apps/patch/fileops"
-	"xgit/apps/patch/gitops"
 	"xgit/apps/patch/preflight"
 )
 
-// ========== 小工具：从 map 中读取参数（带默认值） ==========
-func argBool(m map[string]string, key string, def bool) bool {
-	if v, ok := m[key]; ok {
-		switch strings.ToLower(strings.TrimSpace(v)) {
-		case "1", "true", "yes", "y", "on":
-			return true
-		case "0", "false", "no", "n", "off":
-			return false
-		}
-	}
-	return def
-}
-func argInt(m map[string]string, key string, def int) int {
-	if v, ok := m[key]; ok {
-		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
-			return n
-		}
-	}
-	return def
-}
-func argStr(m map[string]string, key, def string) string {
-	if v, ok := m[key]; ok && strings.TrimSpace(v) != "" {
-		return v
-	}
-	return def
-}
-
-// XGIT:BEGIN APPLY DISPATCH
-// 将 11 条 file.* 指令全部分发到同包内实现（fileops/*.go），保持日志风格一致
-func applyOp(repo string, op *FileOp, logger *DualLogger) error {
-	switch op.Cmd {
-
-	case "file.write":
-		return fileops.FileWrite(repo, op.Path, []byte(op.Body), logger)
-
-	case "file.append":
-		return fileops.FileAppend(repo, op.Path, []byte(op.Body), logger)
-
-	case "file.prepend":
-		return fileops.FilePrepend(repo, op.Path, []byte(op.Body), logger)
-
-	case "file.replace": {
-		// 约定：复杂文本参数（pattern 等）由解析器写入 op.Args；正文作为替换体（可为空表示删除命中片段）
-		pattern := argStr(op.Args, "pattern", "")
-		if pattern == "" {
-			return errors.New("file.replace: missing @pattern (body param)")
-		}
-		repl := op.Body
-
-		// 传统选项
-		isRegex   := argBool(op.Args, "regex", false)
-		icase     := argBool(op.Args, "ci", false)
-		lineFrom  := argInt (op.Args, "start_line", 0)
-		lineTo    := argInt (op.Args, "end_line",   0)
-		count     := argInt (op.Args, "count", 0)
-		ensureNL  := argBool(op.Args, "ensure_eof_nl", false)
-		multiline := argBool(op.Args, "multiline", false)
-
-		// 人类友好附加参数（可选）
-		mode       := strings.TrimSpace(strings.ToLower(argStr(op.Args, "mode", ""))) // "", contains_line, equals_line, contains_file, regex
-		ignoreSpc  := argBool(op.Args, "ignore_spaces", false)
-		debugNoHit := argBool(op.Args, "debug", false)
-
-		logf := func(format string, a ...any) { if logger != nil { logger.Log(format, a...) } }
-
-		return fileops.FileReplace(
-			repo, op.Path, pattern, repl,
-			isRegex, icase,
-			lineFrom, lineTo,
-			count, ensureNL, multiline,
-			mode, ignoreSpc, debugNoHit,
-			logf,
-		)
-	}
-
-	case "file.delete":
-		return fileops.FileDelete(repo, op.Path, logger)
-
-	case "file.move":
-		// 新协议：目标路径来自正文第一行，解析器已写入 op.Args["to"]
-		to := strings.TrimSpace(op.Args["to"])
-		if to == "" {
-			return errors.New("file.move: 缺少目标路径（正文第一行）")
-		}
-		return fileops.FileMove(repo, op.Path, to, logger)
-
-	case "file.chmod":
-		modeStr := strings.TrimSpace(op.Args["mode"])
-		if modeStr == "" {
-			return errors.New("file.chmod: 缺少 mode（八进制，如 644/755）")
-		}
-		u, err := strconv.ParseUint(modeStr, 8, 32)
-		if err != nil {
-			return errors.New("file.chmod: 解析 mode 失败（只支持八进制数值，例如 644/755）")
-		}
-		return fileops.FileChmod(repo, op.Path, os.FileMode(u), logger)
-
-	case "file.eol":
-		style := strings.ToLower(strings.TrimSpace(argStr(op.Args, "style", "lf")))
-		ensureNL := argBool(op.Args, "ensure_nl", true)
-		return fileops.FileEOL(repo, op.Path, style, ensureNL, logger)
-
-	case "file.image":
-		raw := strings.TrimSpace(op.Body)
-		if raw == "" {
-			return errors.New("file.image: 缺少 base64 内容")
-		}
-		bin, err := base64.StdEncoding.DecodeString(raw)
-		if err != nil {
-			return errors.New("file.image: base64 解码失败")
-		}
-		return fileops.FileImage(repo, op.Path, string(bin), logger)
-
-	case "file.binary":
-		raw := strings.TrimSpace(op.Body)
-		if raw == "" {
-			return errors.New("file.binary: 缺少 base64 内容")
-		}
-		bin, err := base64.StdEncoding.DecodeString(raw)
-		if err != nil {
-			return errors.New("file.binary: base64 解码失败")
-		}
-		return fileops.FileBinary(repo, op.Path, string(bin), logger)
-
-	case "file.diff":
-		// 传入 header 的路径，便于 diff.go 在缺少文件头时自动包装
-		return fileops.FileDiff(repo, op.Path, op.Body, logger)
-
-	// ========== gitops 系列 ==========
-	case "git.diff":
-		return gitops.Diff(repo, op.Body, logger)
-
-	case "git.revert":
-		// 接口：Revert(repo, spec, strategy, logger)
-		// spec：commit 或 commit..commit（优先 @spec，兜底用 Body）
-		// strategy：默认 "abort" 或 "merge" 等
-		spec := strings.TrimSpace(argStr(op.Args, "spec", op.Body))
-		if spec == "" {
-			return errors.New("git.revert: missing spec")
-		}
-		strategy := strings.TrimSpace(argStr(op.Args, "strategy", "abort"))
-		return gitops.Revert(repo, spec, strategy, logger)
-
-	case "git.tag":
-		// 接口：Tag(repo, name, ref, message, annotate, force, logger)
-		name := strings.TrimSpace(argStr(op.Args, "name", ""))
-		if name == "" {
-			return errors.New("git.tag: missing name")
-		}
-		ref := strings.TrimSpace(argStr(op.Args, "ref", "HEAD"))
-		message := argStr(op.Args, "message", "")
-		annotate := argBool(op.Args, "annotate", message != "")
-		force := argBool(op.Args, "force", false)
-		return gitops.Tag(repo, name, ref, message, annotate, force, logger)
-
-	default:
-		return errors.New("未知指令: " + op.Cmd)
-	}
-}
-// XGIT:END APPLY DISPATCH
-
-// —— 用下面这个函数整体替换你当前的 ApplyOnce ——
-
-// XGIT:BEGIN APPLY ONCE
 // ApplyOnce：用事务包裹“执行阶段”，成功后再统一提交/推送
-// 同时把日志“截断写入 repo/patch.log”（仅保留最近一次），并与控制台同步输出。
+// 同时把日志“截断写入 repo/patch.log”，并与控制台同步输出。
 func ApplyOnce(logger *DualLogger, repo string, patch *Patch) {
 	// 1) 打开/截断 patch.log
 	logPath := filepath.Join(repo, "patch.log")
-	f, ferr := os.Create(logPath) // os.Create 会截断旧内容
-	if ferr != nil {
-		if logger != nil {
-			logger.Log("⚠️ 无法写入 patch.log：%v（将仅输出到控制台）", ferr)
-		}
+	f, ferr := os.Create(logPath) // 截断旧内容
+	if ferr != nil && logger != nil {
+		logger.Log("⚠️ 无法写入 patch.log：%v（将仅输出到控制台）", ferr)
 	}
-
-	// 简单的双写封装：既写控制台，也写文件
 	writeFile := func(s string) {
 		if f != nil {
 			_, _ = f.WriteString(s)
@@ -210,12 +36,13 @@ func ApplyOnce(logger *DualLogger, repo string, patch *Patch) {
 	logf := func(format string, a ...any) { log(format, a...) }
 	defer func() { if f != nil { _ = f.Close() } }()
 
+	// 预检（影子工作区 + 语言 runner）
 	if err := runPreflightDryRun(repo, patch, logger); err != nil {
 		log("❌ 预检失败：%v", err)
 		return
 	}
 
-	// 2) 事务阶段：逐条执行 file.*，任一失败则回滚到补丁前 HEAD
+	// 2) 事务阶段
 	err := WithGitTxn(repo, logf, func() error {
 		for i, op := range patch.Ops {
 			tag := fmt.Sprintf("%s #%d", op.Cmd, i+1)
@@ -228,11 +55,10 @@ func ApplyOnce(logger *DualLogger, repo string, patch *Patch) {
 		return nil
 	})
 	if err != nil {
-		// 事务内部已回滚并输出日志
-		return
+		return // 事务内部已回滚并记录日志
 	}
 
-	// 3) 成功后统一 stage/commit/push（不置于事务内）
+	// 3) 统一 stage/commit/push
 	_ = runCmd("git", "-C", repo, "add", "-A")
 
 	names, _ := runCmdOut("git", "-C", repo, "diff", "--cached", "--name-only")
@@ -258,154 +84,6 @@ func ApplyOnce(logger *DualLogger, repo string, patch *Patch) {
 	}
 	log("✅ 本次补丁完成")
 }
-// XGIT:END APPLY ONCE
 
-// XGIT:BEGIN GIT_TXN_HELPERS
-// 说明：仅保留 runCmd / runCmdOut + WithGitTxn；不再提供 shell() 简化器
-func runCmd(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%s %s failed: %v\n%s", name, strings.Join(args, " "), err, string(out))
-	}
-	return nil
-}
-func runCmdOut(name string, args ...string) (string, error) {
-	cmd := exec.Command(name, args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("%s", string(out))
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-func gitRevParseHEAD(repo string) (string, error) {
-	return runCmdOut("git", "-C", repo, "rev-parse", "--verify", "HEAD")
-}
-func gitResetHard(repo, rev string) error {
-	if rev == "" {
-		return runCmd("git", "-C", repo, "reset", "--hard")
-	}
-	return runCmd("git", "-C", repo, "reset", "--hard", rev)
-}
-func gitCleanFD(repo string) error {
-	return runCmd("git", "-C", repo, "clean", "-fd")
-}
-
-// WithGitTxn：在 repo 上开启一次 Git 事务：fn() 出错则回滚到补丁前状态。
-func WithGitTxn(repo string, logf func(string, ...any), fn func() error) error {
-	preHead, _ := gitRevParseHEAD(repo)
-	_ = gitResetHard(repo, "")
-	_ = gitCleanFD(repo)
-
-	var err error
-	defer func() {
-		if err != nil {
-			if preHead != "" {
-				_ = gitResetHard(repo, preHead)
-			} else {
-				_ = gitResetHard(repo, "")
-			}
-			_ = gitCleanFD(repo)
-			if logf != nil {
-				logf("↩️ 回滚到补丁前状态：%s", preHead)
-			}
-		}
-	}()
-
-	if e := fn(); e != nil {
-		err = e
-		return err
-	}
-	return nil
-}
-// XGIT:END GIT_TXN_HELPERS
-
-func runPreflightDryRun(repo string, patch *Patch, logger *DualLogger) error {
-    logf := func(format string, a ...any) { if logger != nil { logger.Log(format, a...) } }
-
-    // 1) 建影子工作区
-    shadow, err := os.MkdirTemp("", "xgit_preflight_*")
-    if err != nil {
-        return fmt.Errorf("创建影子工作区失败：%w", err)
-    }
-    defer os.RemoveAll(shadow)
-
-    if err := runCmd("git", "-C", repo, "worktree", "add", "--detach", shadow, "HEAD"); err != nil {
-        return fmt.Errorf("git worktree add 失败：%w", err)
-    }
-    defer func() { _ = runCmd("git", "-C", repo, "worktree", "remove", "--force", shadow) }()
-
-    // 2) 在影子上“干跑”补丁（不 commit，不 push）
-    for i, op := range patch.Ops {
-        tag := fmt.Sprintf("%s #%d", op.Cmd, i+1)
-        if e := applyOp(shadow, op, logger); e != nil {
-            logf("❌ 预检执行失败（影子）%s：%v", tag, e)
-            return e
-        }
-    }
-
-    // 3) 收集改动文件
-    out, _ := runCmdOut("git", "-C", shadow, "status", "--porcelain")
-    changed := make([]string, 0, 32)
-    for _, line := range strings.Split(out, "\n") {
-        line = strings.TrimSpace(line)
-        if line == "" { continue }
-        // 格式：XY<space>path
-        if len(line) > 3 {
-            changed = append(changed, strings.TrimSpace(line[3:]))
-        }
-    }
-    if len(changed) == 0 {
-        logf("ℹ️ 预检：无文件变更")
-        return nil
-    }
-
-    // 4) 调用 preflight 注册中心（你已有 preflight/registry.go）
-    if err := preflightRun(shadow, changed, logger); err != nil {
-        return err
-    }
-
-    logf("✅ 预检通过（文件数：%d）", len(changed))
-    return nil
-}
-
-
-// 预检：对 files 中的每个文件选择合适的 Runner 并执行
-func preflightRun(repo string, files []string, logger *DualLogger) error {
-	// 日志函数
-	logf := func(format string, a ...any) {
-		if logger != nil {
-			logger.Log(format, a...)
-		}
-	}
-
-	for _, f := range files {
-		rel := strings.TrimSpace(f)
-		if rel == "" {
-			continue
-		}
-
-		// 仅用于日志的语言提示（基于扩展名）
-		lang := preflight.DetectLangByExt(rel)
-		if lang == "" {
-			lang = "unknown"
-		}
-		logf("🧪 预检 %s (%s)", rel, lang)
-
-		// 选择并运行对应的预检器
-		if r := preflight.Lookup(rel); r != nil {
-			changed, err := r.Run(repo, rel, logf)
-			if err != nil {
-				return fmt.Errorf("预检失败 %s: %w", rel, err)
-			}
-			if changed {
-				logf("🛠️ 预检已修改 %s", rel)
-			} else {
-				logf("✔ 预检通过，无需修改：%s", rel)
-			}
-		} else {
-			logf("ℹ️ 无匹配的预检器：%s", rel)
-		}
-	}
-	return nil
-}
+// 仅为编译引用，确保预检包被链接（如你已在别处用到可删）
+var _ = preflight.Register
