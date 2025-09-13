@@ -115,11 +115,7 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 		return fileops.FileEOL(repo, op.Path, style, ensureNL, logger)
 
 	case "file.image":
-		// base64 可以在 Body；若 Body 为空，则支持 data 参数（多行块）
 		raw := strings.TrimSpace(op.Body)
-		if raw == "" {
-			raw = strings.TrimSpace(op.Args["data"])
-		}
 		if raw == "" {
 			return errors.New("file.image: 缺少 base64 内容")
 		}
@@ -131,9 +127,6 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 
 	case "file.binary":
 		raw := strings.TrimSpace(op.Body)
-		if raw == "" {
-			raw = strings.TrimSpace(op.Args["data"])
-		}
 		if raw == "" {
 			return errors.New("file.binary: 缺少 base64 内容")
 		}
