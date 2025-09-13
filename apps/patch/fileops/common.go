@@ -1,13 +1,12 @@
-/*
-XGIT FileOps: 通用文本工具（换行规范化等）
-*/
-// XGIT:BEGIN GO:PACKAGE
 package fileops
-// XGIT:END GO:PACKAGE
 
-// XGIT:BEGIN GO:IMPORTS
-import "strings"
-// XGIT:END GO:IMPORTS
+import (
+	"strings"
+)
+// 仅声明所需能力；主包里的 DualLogger 已实现 Log(...)，能自动满足此接口
+type DualLogger interface {
+	Log(format string, a ...any)
+}
 
 // XGIT:BEGIN GO:FUNC_TEXT_UTILS
 func normalizeLF(s string) string {
