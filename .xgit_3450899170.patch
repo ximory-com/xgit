@@ -1,0 +1,32 @@
+diff --git a/tests/gitdiff/go_suite/will_modify.go b/tests/gitdiff/go_suite/will_modify.go
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/tests/gitdiff/go_suite/will_modify.go
+@@ -0,0 +6 @@
++package main
++
++// will_modify
++func Hello() string {
++	return "hi"
++}
+diff --git a/tests/gitdiff/go_suite/will_rename_from.go b/tests/gitdiff/go_suite/will_rename_from.go
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/tests/gitdiff/go_suite/will_rename_from.go
+@@ -0,0 +4 @@
++package main
++
++// will_rename_from
++func from() {}
+diff --git a/tests/gitdiff/go_suite/will_delete.go b/tests/gitdiff/go_suite/will_delete.go
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/tests/gitdiff/go_suite/will_delete.go
+@@ -0,0 +4 @@
++package main
++
++// to delete
++func x() {}
