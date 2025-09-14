@@ -7,7 +7,6 @@ package main
 
 // XGIT:BEGIN IMPORTS
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -66,9 +65,6 @@ func main() {
 		}
 		defer func() { _ = os.Remove(pidFile) }()
 
-		// 加载 .repos
-		repos, def := LoadRepos(baseDir)
-
 		// watcher
 		w := NewWatcher(patchFile, eofMark, logger)
 
@@ -96,26 +92,17 @@ func main() {
 				}
 
 				// repo 选择：优先补丁头 repo: <name|/abs/path>，否则 .repos 的 default
-				target := headerRepoName(patchFile)
-				if target == "" {
-					target = def
-				}
-				repoPath := ""
-				if strings.HasPrefix(target, "/") {
-					repoPath = target
-				} else {
-					repoPath = repos[target]
-				}
-				if strings.TrimSpace(repoPath) == "" {
-					logger.Log("❌ 无法解析仓库（补丁头 repo: 或 .repos/default）")
+				repoPath, err := resolveRepo(baseDir, patchFile)
+				if err != nil {
+					logger.Log("❌ %v", err)
 					lastHash = h8
 					time.Sleep(700 * time.Millisecond)
 					continue
 				}
 
-				ApplyOnce(logger, repoPath, pt)
+				ApplyOnce(logger, repoPath, pt, patchFile)
 				lastHash = h8
-				saveLastHash(baseDir,lastHash)
+				saveLastHash(baseDir, lastHash)
 			}
 			time.Sleep(250 * time.Millisecond)
 		}
@@ -140,38 +127,43 @@ func main() {
 }
 // XGIT:END MAIN
 
-// XGIT:BEGIN HEADER-REPO
-// 从补丁头部读取 repo: 字段（直到遇到第一个 "===" 为止）
-func headerRepoName(patchFile string) string {
-	f, err := os.Open(patchFile)
-	if err != nil {
-		return ""
+// XGIT:BEGIN RESOLVE-REPO
+// 统一仓库解析逻辑
+func resolveRepo(baseDir, patchFile string) (string, error) {
+	// 1) 读 .repos
+	repos, def := LoadRepos(baseDir)
+
+	// 2) 读补丁头 repo:
+	target := HeaderRepoName(patchFile)
+	if strings.TrimSpace(target) == "" {
+		target = def
 	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		if strings.HasPrefix(line, "repo:") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "repo:"))
-		}
-		if strings.HasPrefix(line, "===") {
-			break
-		}
+	if strings.TrimSpace(target) == "" {
+		return "", fmt.Errorf("无法解析仓库：既无补丁头 repo:，也无 .repos default")
 	}
-	return ""
+
+	// 3) 按规则返回（禁止绝对路径）
+	if strings.HasPrefix(target, "/") {
+		return "", fmt.Errorf("不支持绝对路径仓库：%s（请在 .repos 里用名字映射）", target)
+	}
+	repoPath := strings.TrimSpace(repos[target])
+	if repoPath == "" {
+		return "", fmt.Errorf("在 .repos 中未找到仓库名映射：%s", target)
+	}
+	return repoPath, nil
 }
-// XGIT:END HEADER-REPO
+// XGIT:END RESOLVE-REPO
+
+// XGIT:BEGIN LAST-HASH
 func saveLastHash(baseDir, hash string) {
-    os.WriteFile(filepath.Join(baseDir, ".lastpatch"), []byte(hash), 0644)
+	_ = os.WriteFile(filepath.Join(baseDir, ".lastpatch"), []byte(hash), 0644)
 }
 
 func loadLastHash(baseDir string) string {
-    data, err := os.ReadFile(filepath.Join(baseDir, ".lastpatch"))
-    if err != nil {
-        return ""
-    }
-    return strings.TrimSpace(string(data))
+	data, err := os.ReadFile(filepath.Join(baseDir, ".lastpatch"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
+// XGIT:END LAST-HASH

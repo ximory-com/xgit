@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"os/exec"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -63,26 +65,35 @@ func WithGitTxn(repo string, logf func(string, ...any), fn func() error) error {
 	return nil
 }
 
+// 收集变更文件，过滤目录/重命名 old 端
 func collectChangedFiles(repo string) ([]string, error) {
-    out, err := runCmdOut("git", "-C", repo, "status", "--porcelain")
-    if err != nil {
-        return nil, err
-    }
-    files := make([]string, 0, 32)
-    for _, line := range strings.Split(out, "\n") {
-        line = strings.TrimSpace(line)
-        if line == "" {
-            continue
-        }
-        // 格式：XY<space>path（可能包含重命名 -> 取右侧路径）
-        if len(line) > 3 {
-            p := strings.TrimSpace(line[3:])
-            // 处理类似 "R  old -> new"
-            if i := strings.Index(p, " -> "); i >= 0 {
-                p = strings.TrimSpace(p[i+4:])
-            }
-            files = append(files, p)
-        }
-    }
-    return files, nil
+	out, err := runCmdOut("git", "-C", repo, "status", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+	var changed []string
+	for _, raw := range strings.Split(strings.TrimSpace(out), "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || len(line) <= 3 {
+			continue
+		}
+		payload := strings.TrimSpace(line[3:])
+
+		// R old -> new 只取 new
+		if idx := strings.Index(payload, "->"); idx >= 0 {
+			payload = strings.TrimSpace(payload[idx+2:])
+		}
+
+		// 跳过明显目录（?? dir/）
+		if strings.HasSuffix(payload, "/") {
+			continue
+		}
+		// 文件系统再判一次，目录跳过
+		full := filepath.Join(repo, payload)
+		if fi, err := os.Stat(full); err == nil && fi.IsDir() {
+			continue
+		}
+		changed = append(changed, payload)
+	}
+	return changed, nil
 }
