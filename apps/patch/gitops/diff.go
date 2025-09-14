@@ -258,42 +258,6 @@ func syncPrereqsToShadow(realRepo, shadow string, diffText string, logger DualLo
 	}
 }
 
-// collectChangedFiles 用 git status --porcelain 收集变更路径
-func collectChangedFiles(repo string, logger DualLogger) ([]string, error) {
-	out, err := runGit(repo, logger, "status", "--porcelain", "-uall")
-	if err != nil {
-		return nil, err
-	}
-	var changed []string
-	for _, raw := range strings.Split(strings.TrimSpace(out), "\n") {
-		line := strings.TrimSpace(raw)
-		if line == "" || len(line) <= 3 {
-			continue
-		}
-		payload := strings.TrimSpace(line[3:]) // 跳过 XY 和空格
-
-		// 处理 rename： "R  old -> new" / "R100 old -> new"
-		if idx := strings.Index(payload, "->"); idx >= 0 {
-			payload = strings.TrimSpace(payload[idx+2:])
-		}
-
-		// 忽略明显目录标记（porcelain 可能是 "?? dir/"）
-		if strings.HasSuffix(payload, "/") {
-			continue
-		}
-
-		full := filepath.Join(repo, payload)
-		if fi, err := os.Stat(full); err == nil && fi.IsDir() {
-			continue
-		}
-		if isTempPatch(payload) {
-			continue
-		}
-
-		changed = append(changed, payload)
-	}
-	return changed, nil
-}
 
 // runPreflights 跑注册的预检器（含 goFmtRunner -> 末尾仅一换行 + gofmt）
 func runPreflights(repo string, files []string, diffText string, logger DualLogger) error {
@@ -344,16 +308,45 @@ func runPreflights(repo string, files []string, diffText string, logger DualLogg
 	return nil
 }
 
-// exportNormalizedPatch 把影子中的变更导出为“规范化补丁”（git diff）
+// ---------- 用索引导出规范化补丁（修复空补丁） ----------
 func exportNormalizedPatch(shadow string, logger DualLogger) (string, error) {
-	// 全量 add、导出 diff（不带颜色，含二进制）
+	// 全量 add
 	_, _ = runGit(shadow, logger, "add", "-A")
-	out, err := runGit(shadow, logger, "diff", "--no-color", "--binary")
+
+	// 必须从索引对比 HEAD 导出；若用工作区对比，add 之后可能导出空补丁
+	out, err := runGit(shadow, logger, "diff", "--cached", "--no-color", "--binary")
 	if err != nil {
 		return "", fmt.Errorf("导出规范化补丁失败：%w", err)
 	}
 	return out, nil
 }
+
+// ---------- 直接用 diff --cached --name-only 收集改动 ----------
+func collectChangedFiles(repo string, logger DualLogger) ([]string, error) {
+	// 只看已经加入索引、待提交的改动；最贴近我们随后导出的规范化补丁
+	out, err := runGit(repo, logger, "diff", "--cached", "--name-only")
+	if err != nil {
+		return nil, err
+	}
+	var changed []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		rel := strings.TrimSpace(line)
+		if rel == "" {
+			continue
+		}
+		// 过滤目录（极端情况下 name-only 不会给目录，但稳一手）
+		if strings.HasSuffix(rel, "/") {
+			continue
+		}
+		// 若确实是目录也跳过
+		if fi, err := os.Stat(filepath.Join(repo, rel)); err == nil && fi.IsDir() {
+			continue
+		}
+		changed = append(changed, rel)
+	}
+	return changed, nil
+}
+
 
 // applyWithStrategies 依次尝试策略集（允许/禁止 3-way）
 func applyWithStrategies(repo string, patchPath string, allow3 bool, logger DualLogger, isDelete bool) error {
