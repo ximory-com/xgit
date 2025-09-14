@@ -10,27 +10,20 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"xgit/apps/patch/preflight"
 )
 
-// 依赖：
-// - DualLogger 接口（在 gitops/common.go 已声明）
-// - runGit(repo, logger, args...) (string, error)：封装 git 命令执行并返回合并输出
-// - findRejects(repo) ([]string, error)：扫描 .rej 文件（可放在 gitops/common.go）
+// 依赖（已在 gitops/common.go 等处提供）：
+// - type DualLogger interface{ Log(format string, a ...any) }
+// - runGit(repo string, logger DualLogger, args ...string) (string, error)
+// - findRejects(repo string) ([]string, error)
 //
-// 说明：Diff v2 做了这些增强：
-// 1) 预处理 diff 文本：剥掉 ```diff/```patch 围栏，trim，保证末尾换行；
-// 2) 校验是有效 diff（包含 "diff --git" 或者 '---'/'+++' 头）；
-// 3) 解析受影响路径：识别新增/删除（/dev/null / new file mode / deleted file mode），
-//    对潜在新增文件先 git add -N，以提升 --index 应用成功率；
-// 4) 智能策略：若包含新增/删除则跳过 3-way；否则按优先级尝试：
-//       (a) --index --3way
-//       (b) --3way
-//       (c) --index
-//       (d) 直贴
-// 5) 失败时给出 git 输出，并从 .patch 文件中打印报错行上下文（±20 行），同时列出 .rej；
-// 6) 环境变量：
-//    - XGIT_KEEP_PATCH=1    留存临时补丁文件（默认删除）
-//    - XGIT_SHOW_PATCH=1    控制台打印补丁预览（最多 200 行，避免爆屏）
+// v3 变更：在真实仓库应用前，先在“影子 worktree”应用原始补丁 -> 影子里跑预检（含 gofmt 与末尾仅一换行修复）
+// -> 用影子导出“规范化补丁” -> 再按策略集应用到真实仓库。
+// 好处：统一把 go 文件末尾换行/gofmt 问题在影子阶段修好，最大化降低 corrupt/预检不通过。
+
+// Diff 应用 diffText 到 repo。
 func Diff(repo string, diffText string, logger DualLogger) error {
 	log := func(format string, a ...any) {
 		if logger != nil {
@@ -41,85 +34,216 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 		return errors.New("git.diff: 空 diff")
 	}
 
-	// 1) 预处理
+	// 1) 预处理并校验 diff
 	diffText = sanitizeDiff(diffText)
-
-	// 2) 检查是否像个 diff
 	if !looksLikeDiff(diffText) {
 		return errors.New("git.diff: 输入不是有效的 diff（缺少 diff 头）")
 	}
 
-	// 3) 解析路径与新增/删除特征
-	paths, hasDevNull, hasNewFileMode, hasDeletedMode := parseDiffPaths(diffText)
-	containsAddOrDelete := hasDevNull || hasNewFileMode || hasDeletedMode
+	// 路径/新增删除特征（决定策略）
+	_, hasDevNull, hasNewMode, hasDelMode := parseDiffPaths(diffText)
+	allow3 := !(hasDevNull || hasNewMode || hasDelMode)
 
-	// 对疑似新增（b/ 路径）做意向添加，让 --index 能找到 blob
-	if len(paths.bPaths) > 0 {
-		for _, p := range paths.bPaths {
-			if p == "/dev/null" {
-				continue
-			}
-			_, _ = runGit(repo, logger, "add", "-N", p)
-		}
-	}
-
-	// 4) 临时补丁文件
 	keep := os.Getenv("XGIT_KEEP_PATCH") == "1"
 	show := os.Getenv("XGIT_SHOW_PATCH") == "1"
 
-	dir := repo
-	if strings.TrimSpace(dir) == "" {
-		dir = "."
-	}
-	tmpf, err := os.CreateTemp(dir, ".xgit_*.patch")
+	// 2) 先把“原始补丁”写入临时文件（用于影子仓库尝试）
+	rawPatch, err := writeTempPatch(repo, diffText, keep)
 	if err != nil {
 		log("❌ git.diff 临时文件失败：%v", err)
 		return err
 	}
-	tmp := tmpf.Name()
-	if !keep {
-		defer os.Remove(tmp)
-	}
-	if _, err := tmpf.WriteString(diffText); err != nil {
-		_ = tmpf.Close()
-		return err
-	}
-	if err := tmpf.Sync(); err != nil {
-		_ = tmpf.Close()
-		return err
-	}
-	if err := tmpf.Close(); err != nil {
-		return err
-	}
-
-	log("📄 git.diff 正在应用补丁：%s", filepath.Base(tmp))
 	if show {
 		log("📄 补丁预览（最多 200 行）：\n%s", previewLines(diffText, 200))
 	}
 
-	// 5) 决策策略集
-	strategies := buildStrategies(!containsAddOrDelete)
+	// 3) 影子 worktree：应用原始补丁 -> 预检 -> 导出规范化补丁
+	shadow, cleanupShadow, err := addShadowWorktree(repo, logger)
+	if err != nil {
+		return err
+	}
+	defer cleanupShadow()
 
-	// 6) 逐策略尝试
+	// 影子里先做意向 add（提升 --index 命中率）
+	intentAddFromDiff(shadow, diffText, logger)
+
+	log("📄 [影子] 正在应用原始补丁：%s", filepath.Base(rawPatch))
+	if err := applyWithStrategies(shadow, rawPatch, allow3, logger); err != nil {
+		return wrapPatchErrorWithContext(rawPatch, err, logger)
+	}
+
+	// 影子里收集变更并预检（含 go fmt/末尾换行统一）
+	changed, _ := collectChangedFiles(shadow, logger)
+	if len(changed) > 0 {
+		log("🧪 [影子] 预检：%d 个文件", len(changed))
+		if err := runPreflights(shadow, changed, logger); err != nil {
+			log("❌ [影子] 预检失败：%v", err)
+			return err
+		}
+	} else {
+		log("ℹ️ [影子] 无文件变更")
+	}
+
+	// 用影子导出“规范化补丁”
+	normText, err := exportNormalizedPatch(shadow, logger)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(normText) == "" {
+		log("ℹ️ [影子] 规范化后无改动需要应用。")
+		return nil
+	}
+	// 规范化补丁也要校验/决定策略
+	_, nHasDevNull, nHasNewMode, nHasDelMode := parseDiffPaths(normText)
+	nAllow3 := !(nHasDevNull || nHasNewMode || nHasDelMode)
+
+	normPatch, err := writeTempPatch(repo, normText, keep)
+	if err != nil {
+		return err
+	}
+
+	// 4) 在真实仓库应用“规范化补丁”
+	log("📄 git.diff 正在应用补丁：%s", filepath.Base(normPatch))
+	if err := applyWithStrategies(repo, normPatch, nAllow3, logger); err != nil {
+		// 打印错误上下文 & .rej
+		return wrapPatchErrorWithContext(normPatch, err, logger)
+	}
+	// 成功检查 .rej
+	if rejs, _ := findRejects(repo); len(rejs) > 0 {
+		var b strings.Builder
+		for _, r := range rejs {
+			b.WriteString(" - ")
+			b.WriteString(r)
+			b.WriteString("\n")
+		}
+		return fmt.Errorf("git.diff: 存在未能应用的 hunk（生成 .rej）：\n%s", b.String())
+	}
+
+	log("✅ git.diff 完成（规范化补丁）")
+	return nil
+}
+
+// ---------- 影子阶段 & 预检 & 规范化导出 ----------
+
+// addShadowWorktree 新建影子工作区
+func addShadowWorktree(repo string, logger DualLogger) (shadow string, cleanup func(), err error) {
+	shadow, err = os.MkdirTemp("", "xgit_shadow_*")
+	if err != nil {
+		return "", nil, fmt.Errorf("创建影子工作区失败：%w", err)
+	}
+	if _, e := runGit(repo, logger, "worktree", "add", "--detach", shadow, "HEAD"); e != nil {
+		os.RemoveAll(shadow)
+		return "", nil, fmt.Errorf("git worktree add 失败：%w", e)
+	}
+	cleanup = func() {
+		_, _ = runGit(repo, logger, "worktree", "remove", "--force", shadow)
+		_ = os.RemoveAll(shadow)
+	}
+	return shadow, cleanup, nil
+}
+
+// intentAddFromDiff 对 b/ 路径做 git add -N
+func intentAddFromDiff(repo string, diffText string, logger DualLogger) {
+	paths, _, _, _ := parseDiffPaths(diffText)
+	for _, p := range paths.bPaths {
+		if p == "/dev/null" {
+			continue
+		}
+		_, _ = runGit(repo, logger, "add", "-N", p)
+	}
+}
+
+// collectChangedFiles 用 git status --porcelain 收集变更路径
+func collectChangedFiles(repo string, logger DualLogger) ([]string, error) {
+	out, err := runGit(repo, logger, "status", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+	var changed []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if len(line) > 3 {
+			changed = append(changed, strings.TrimSpace(line[3:]))
+		}
+	}
+	return changed, nil
+}
+
+// runPreflights 跑注册的预检器（含 goFmtRunner -> 末尾仅一换行 + gofmt）
+func runPreflights(repo string, files []string, logger DualLogger) error {
+	log := func(f string, a ...any) { if logger != nil { logger.Log(f, a...) } }
+	for _, rel := range files {
+		rel = strings.TrimSpace(rel)
+		if rel == "" {
+			continue
+		}
+		// 跳过影子中已删除的文件
+		if _, err := os.Stat(filepath.Join(repo, rel)); err != nil && os.IsNotExist(err) {
+			continue
+		}
+		lang := preflight.DetectLangByExt(rel)
+		if lang == "" {
+			lang = "unknown"
+		}
+		log("🧪 预检 %s (%s)", rel, lang)
+
+		if r := preflight.Lookup(rel); r != nil {
+			changed, err := r.Run(repo, rel, func(fmt string, a ...any) {
+				if logger != nil {
+					logger.Log(fmt, a...)
+				}
+			})
+			if err != nil {
+				return fmt.Errorf("预检失败 %s: %w", rel, err)
+			}
+			if changed {
+				log("🛠️ 预检已修改 %s", rel)
+			} else {
+				log("✔ 预检通过，无需修改：%s", rel)
+			}
+		} else {
+			log("ℹ️ 无匹配的预检器：%s", rel)
+		}
+	}
+	return nil
+}
+
+// exportNormalizedPatch 把影子中的变更导出为“规范化补丁”（git diff）
+func exportNormalizedPatch(shadow string, logger DualLogger) (string, error) {
+	// 全量 add、导出 diff（不带颜色，含二进制）
+	_, _ = runGit(shadow, logger, "add", "-A")
+	out, err := runGit(shadow, logger, "diff", "--no-color", "--binary")
+	if err != nil {
+		return "", fmt.Errorf("导出规范化补丁失败：%w", err)
+	}
+	return out, nil
+}
+
+// applyWithStrategies 依次尝试策略集（允许/禁止 3-way）
+func applyWithStrategies(repo string, patchPath string, allow3 bool, logger DualLogger) error {
+	strategies := buildStrategies(allow3)
 	var lastOut string
 	var lastErr error
+
 	for i, args := range strategies {
-		full := append([]string{"apply"}, append(args, tmp)...)
+		full := append([]string{"apply"}, append(args, patchPath)...)
 		out, err := runGit(repo, logger, full...)
 		if err != nil {
 			lastOut, lastErr = out, err
-			log("⚠️ git %v 失败（策略 #%d）：%v", args, i+1, err)
-
+			if logger != nil {
+				logger.Log("⚠️ git %v 失败（策略 #%d）：%v", args, i+1, err)
+			}
 			// 尝试从错误输出里提取“at line N”，打印上下文
 			if line := extractPatchErrorLine(out); line > 0 {
-				ctx := readPatchContext(tmp, line, 20)
-				if ctx != "" {
-					log("🧭 出错行上下文（±20）：\n%s", ctx)
+				if ctx := readPatchContext(patchPath, line, 20); ctx != "" && logger != nil {
+					logger.Log("🧭 出错行上下文（±20）：\n%s", ctx)
 				}
 			}
 			continue
 		}
-
 		// 成功后检查 .rej
 		if rejs, _ := findRejects(repo); len(rejs) > 0 {
 			var b strings.Builder
@@ -130,20 +254,10 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 			}
 			return fmt.Errorf("git.diff: 存在未能应用的 hunk（生成 .rej）：\n%s", b.String())
 		}
-
-		log("✅ git.diff 完成（策略 #%d）", i+1)
-		return nil
-	}
-
-	// 7) 全部失败，补充 .rej 与最后错误
-	if rejs, _ := findRejects(repo); len(rejs) > 0 {
-		var b strings.Builder
-		for _, r := range rejs {
-			b.WriteString(" - ")
-			b.WriteString(r)
-			b.WriteString("\n")
+		if logger != nil {
+			logger.Log("✅ git.diff 完成（策略 #%d）", i+1)
 		}
-		return fmt.Errorf("%v\n%s\ngit.diff: 同时检测到 .rej 文件：\n%s", lastErr, lastOut, b.String())
+		return nil
 	}
 	if lastErr != nil {
 		return fmt.Errorf("%v\n%s", lastErr, lastOut)
@@ -151,7 +265,7 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 	return errors.New("git.diff: git apply 失败（未知原因）")
 }
 
-// ========== 辅助实现 ==========
+// ---------- 通用小工具 ----------
 
 // sanitizeDiff 移除 ```diff / ```patch 围栏，trim 两端空白，并确保末尾有换行
 func sanitizeDiff(s string) string {
@@ -159,9 +273,8 @@ func sanitizeDiff(s string) string {
 	// 剥离三反引号围栏
 	if strings.HasPrefix(s, "```") {
 		lines := strings.Split(s, "\n")
-		if len(lines) >= 2 && strings.HasPrefix(lines[0], "```") {
-			// 找到最后一行可能的 ```
-			if strings.HasPrefix(lines[len(lines)-1], "```") {
+		if len(lines) >= 2 && strings.HasPrefix(strings.TrimSpace(lines[0]), "```") {
+			if strings.HasPrefix(strings.TrimSpace(lines[len(lines)-1]), "```") {
 				lines = lines[1 : len(lines)-1]
 				s = strings.Join(lines, "\n")
 			}
@@ -176,7 +289,6 @@ func sanitizeDiff(s string) string {
 
 // looksLikeDiff 粗略判断是否是有效 diff
 func looksLikeDiff(s string) bool {
-	// 支持 git diff（带 diff --git 头）或统一 diff（--- / +++）
 	return strings.Contains(s, "diff --git ") ||
 		(strings.Contains(s, "\n--- ") && strings.Contains(s, "\n+++ "))
 }
@@ -221,6 +333,7 @@ func parseDiffPaths(s string) (paths parsedPaths, hasDevNull bool, hasNewFileMod
 	}
 	return
 }
+
 // buildStrategies 根据是否允许 3-way 返回尝试序列参数（不含 "apply" 与补丁路径）
 func buildStrategies(allow3Way bool) [][]string {
 	if allow3Way {
@@ -276,7 +389,6 @@ func readPatchContext(path string, line, around int) string {
 	}
 	var b bytes.Buffer
 	for i := start; i <= end; i++ {
-		// 行号对齐输出
 		fmt.Fprintf(&b, "%5d| %s\n", i, string(lines[i-1]))
 	}
 	return b.String()
@@ -289,4 +401,49 @@ func previewLines(s string, n int) string {
 		lines = lines[:n]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// writeTempPatch 把文本写入 repo 下的临时 .patch 文件
+func writeTempPatch(repo string, text string, keep bool) (string, error) {
+	dir := repo
+	if strings.TrimSpace(dir) == "" {
+		dir = "."
+	}
+	f, err := os.CreateTemp(dir, ".xgit_*.patch")
+	if err != nil {
+		return "", err
+	}
+	path := f.Name()
+	if !keep {
+		defer func() {
+			// 删除动作由调用者在 apply 成功/失败后统一处理更安全；
+			// 这里不 defer remove，避免提前删。调用者可设置 XGIT_KEEP_PATCH 控制保留。
+		}()
+	}
+	if _, err := f.WriteString(text); err != nil {
+		_ = f.Close()
+		return "", err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// wrapPatchErrorWithContext 把 git apply 错误输出补充上下文与 .rej 列表
+func wrapPatchErrorWithContext(patchPath string, err error, logger DualLogger) error {
+	out := fmt.Sprintf("%v", err)
+	var tail strings.Builder
+	if line := extractPatchErrorLine(out); line > 0 {
+		if ctx := readPatchContext(patchPath, line, 20); ctx != "" {
+			tail.WriteString("\n🧭 出错行上下文（±20）：\n")
+			tail.WriteString(ctx)
+		}
+	}
+	// .rej 信息在调用层已有检查；这里仅返回拼接后的错误
+	return fmt.Errorf("%v%s", err, tail.String())
 }

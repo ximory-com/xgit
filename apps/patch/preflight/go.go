@@ -21,6 +21,12 @@ func (goFmtRunner) Run(repo, rel string, logf Logf) (bool, error) {
 		return false, err
 	}
 
+	// 空文件 → 保持不动
+	if len(orig) == 0 {
+		logf("🧪 preflight(go): %s 空文件，跳过", rel)
+		return false, nil
+	}
+
 	// 记录 EOL 风格与权限/mtime
 	isCRLF := bytes.Contains(orig, []byte("\r\n"))
 	mode := os.FileMode(0o644)
