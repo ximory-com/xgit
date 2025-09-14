@@ -1,3 +1,0 @@
-中文：你好，世界！
-emoji: BAR🙂bar🙂BAR
-mixed: ¡Hola! BAR — こんにちは BAR

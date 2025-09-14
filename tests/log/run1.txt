@@ -1,2 +1,0 @@
-Run #1
-This file is only to check that patch.log is truncated on the next run.
