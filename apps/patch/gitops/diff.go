@@ -47,6 +47,7 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 	// 路径/新增删除特征（决定是否启用 3-way）
 	_, hasDevNull, hasNewMode, hasDelMode := parseDiffPaths(diffText)
 	allow3 := !(hasDevNull || hasNewMode || hasDelMode)
+	isDelete := detectDelete(diffText) // 👈 新增：识别是否为“删除文件”场景
 
 	keep := os.Getenv("XGIT_KEEP_PATCH") == "1"
 	show := os.Getenv("XGIT_SHOW_PATCH") == "1"
@@ -73,7 +74,7 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 	syncPrereqsToShadow(repo, shadow, diffText, logger)
 
 	log("📄 [影子] 正在应用原始补丁：%s", filepath.Base(rawPatch))
-	if err := applyWithStrategies(shadow, rawPatch, allow3, logger); err != nil {
+	if err := applyWithStrategies(shadow, rawPatch, allow3, logger, isDelete); err != nil {
 		return wrapPatchErrorWithContext(rawPatch, err, logger)
 	}
 
@@ -99,9 +100,10 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 		return nil
 	}
 
-	// 规范化补丁也要决定策略
+	// 规范化补丁也要校验/决定策略
 	_, nHasDevNull, nHasNewMode, nHasDelMode := parseDiffPaths(normText)
 	nAllow3 := !(nHasDevNull || nHasNewMode || nHasDelMode)
+	nIsDelete := detectDelete(normText) 
 
 	normPatch, err := writeTempPatch(repo, normText, keep)
 	if err != nil {
@@ -110,7 +112,8 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 
 	// 4) 在真实仓库应用“规范化补丁”
 	log("📄 git.diff 正在应用补丁：%s", filepath.Base(normPatch))
-	if err := applyWithStrategies(repo, normPatch, nAllow3, logger); err != nil {
+	if err := applyWithStrategies(repo, normPatch, nAllow3, logger, nIsDelete); err != nil { // 👈 传 isDelete
+		// 打印错误上下文 & .rej
 		return wrapPatchErrorWithContext(normPatch, err, logger)
 	}
 	// 成功检查 .rej
@@ -147,17 +150,53 @@ func addShadowWorktree(repo string, logger DualLogger) (shadow string, cleanup f
 	return shadow, cleanup, nil
 }
 
-// intentAddFromDiff 对 b/ 路径做 git add -N
+// intentAddFromDiff 对 a/ 和 b/ 路径、以及 rename from/to 的路径做 git add -N
 func intentAddFromDiff(repo string, diffText string, logger DualLogger) {
 	paths, _, _, _ := parseDiffPaths(diffText)
-	for _, p := range paths.bPaths {
-		if p == "/dev/null" {
-			continue
+
+	addN := func(p string) {
+		p = strings.TrimSpace(p)
+		if p == "" || p == "/dev/null" {
+			return
+		}
+		// 忽略明显目录
+		if strings.HasSuffix(p, "/") {
+			return
 		}
 		_, _ = runGit(repo, logger, "add", "-N", p)
 	}
+
+	// 1) 统一处理 a/… 与 b/… 路径
+	for _, p := range paths.aPaths {
+		addN(p)
+	}
+	for _, p := range paths.bPaths {
+		addN(p)
+	}
+
+	// 2) 解析 rename from/to 并处理
+	rFrom, rTo := parseRenamePairs(diffText)
+	for _, p := range rFrom {
+		addN(p)
+	}
+	for _, p := range rTo {
+		addN(p)
+	}
 }
 
+// 解析 "rename from ..." / "rename to ..."
+func parseRenamePairs(s string) (from []string, to []string) {
+	lines := strings.Split(s, "\n")
+	for _, l := range lines {
+		t := strings.TrimSpace(l)
+		if strings.HasPrefix(t, "rename from ") {
+			from = append(from, strings.TrimSpace(strings.TrimPrefix(t, "rename from ")))
+		} else if strings.HasPrefix(t, "rename to ") {
+			to = append(to, strings.TrimSpace(strings.TrimPrefix(t, "rename to ")))
+		}
+	}
+	return
+}
 // syncPrereqsToShadow：确保影子里存在需要的父目录/前置文件（主要为重命名/修改建立路径）
 func syncPrereqsToShadow(realRepo, shadow string, diffText string, logger DualLogger) {
 	pp, _, _, _ := parseDiffPaths(diffText)
@@ -278,8 +317,8 @@ func exportNormalizedPatch(shadow string, logger DualLogger) (string, error) {
 }
 
 // applyWithStrategies 依次尝试策略集（允许/禁止 3-way）
-func applyWithStrategies(repo string, patchPath string, allow3 bool, logger DualLogger) error {
-	strategies := buildStrategies(allow3)
+func applyWithStrategies(repo string, patchPath string, allow3 bool, logger DualLogger, isDelete bool) error {
+	strategies := buildStrategies(allow3, isDelete)
 	var lastOut string
 	var lastErr error
 
@@ -389,8 +428,17 @@ func parseDiffPaths(s string) (paths parsedPaths, hasDevNull bool, hasNewFileMod
 	return
 }
 
-// buildStrategies 根据是否允许 3-way 返回尝试序列参数（不含 "apply" 与补丁路径）
-func buildStrategies(allow3Way bool) [][]string {
+// buildStrategies 根据是否允许 3-way 和是否删除场景 返回尝试序列参数（不含 "apply" 与补丁路径）
+func buildStrategies(allow3Way bool, isDelete bool) [][]string {
+	// 删除文件：不少仓库 index 里没有该文件，先走“纯 apply”避免 `does not exist in index`
+	if isDelete {
+		return [][]string{
+			{"--whitespace=nowarn"},           // 先不碰 index，最宽松
+			{"--index", "--whitespace=nowarn"}, // 需要时再带 index
+		}
+	}
+
+	// 常规/新增/改名/修改
 	if allow3Way {
 		return [][]string{
 			{"--index", "--3way", "--whitespace=nowarn"},
@@ -399,7 +447,7 @@ func buildStrategies(allow3Way bool) [][]string {
 			{"--whitespace=nowarn"},
 		}
 	}
-	// 新增/删除文件：跳过 3-way
+	// 新增文件（/dev/null 或 new file mode）场景：跳过 3-way
 	return [][]string{
 		{"--index", "--whitespace=nowarn"},
 		{"--whitespace=nowarn"},
@@ -571,3 +619,24 @@ func validateHunkHeaders(s string) error {
 	b.WriteString("请在生成或手写补丁时，保证每个 hunk 头都有 -n[,m] 和 +n[,m]。建议用 `git diff --no-color --binary` 导出补丁。")
 	return errors.New(b.String())
 }
+// ========= [新增] detectDelete：判断 diff 是否包含“删除文件” =========
+func detectDelete(s string) bool {
+	lines := strings.Split(s, "\n")
+	for _, l := range lines {
+		t := strings.TrimSpace(l)
+		// 明确的删除标记
+		if strings.HasPrefix(t, "deleted file mode ") {
+			return true
+		}
+		// 经典删除形态：+++ /dev/null
+		if strings.HasPrefix(t, "+++ ") && strings.HasSuffix(t, "/dev/null") {
+			return true
+		}
+		// 也兼容 --- a/xxx +++ /dev/null 的组合
+		if strings.HasPrefix(t, "--- ") && strings.HasSuffix(t, "/dev/null") {
+			return true
+		}
+	}
+	return false
+}
+// ===========================================================================
