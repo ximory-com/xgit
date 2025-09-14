@@ -260,19 +260,37 @@ func syncPrereqsToShadow(realRepo, shadow string, diffText string, logger DualLo
 
 // collectChangedFiles 用 git status --porcelain 收集变更路径
 func collectChangedFiles(repo string, logger DualLogger) ([]string, error) {
-	out, err := runGit(repo, logger, "status", "--porcelain")
+	out, err := runGit(repo, logger, "status", "--porcelain", "-uall")
 	if err != nil {
 		return nil, err
 	}
 	var changed []string
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	for _, raw := range strings.Split(strings.TrimSpace(out), "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || len(line) <= 3 {
 			continue
 		}
-		if len(line) > 3 {
-			changed = append(changed, strings.TrimSpace(line[3:]))
+		payload := strings.TrimSpace(line[3:]) // 跳过 XY 和空格
+
+		// 处理 rename： "R  old -> new" / "R100 old -> new"
+		if idx := strings.Index(payload, "->"); idx >= 0 {
+			payload = strings.TrimSpace(payload[idx+2:])
 		}
+
+		// 忽略明显目录标记（porcelain 可能是 "?? dir/"）
+		if strings.HasSuffix(payload, "/") {
+			continue
+		}
+
+		full := filepath.Join(repo, payload)
+		if fi, err := os.Stat(full); err == nil && fi.IsDir() {
+			continue
+		}
+		if isTempPatch(payload) {
+			continue
+		}
+
+		changed = append(changed, payload)
 	}
 	return changed, nil
 }
@@ -527,13 +545,9 @@ func previewLines(s string, n int) string {
 	return strings.Join(lines, "\n")
 }
 
-// writeTempPatch 把文本写入 repo 下的临时 .patch 文件
+// writeTempPatch 把文本写到系统临时目录的 .patch 文件（避免被仓库 diff 捕获）
 func writeTempPatch(repo string, text string, keep bool) (string, error) {
-	dir := repo
-	if strings.TrimSpace(dir) == "" {
-		dir = "."
-	}
-	f, err := os.CreateTemp(dir, ".xgit_*.patch")
+	f, err := os.CreateTemp("", ".xgit_*.patch") // 不要放 repo
 	if err != nil {
 		return "", err
 	}
@@ -549,7 +563,7 @@ func writeTempPatch(repo string, text string, keep bool) (string, error) {
 	if err := f.Close(); err != nil {
 		return "", err
 	}
-	// 是否保留文件由上层通过 XGIT_KEEP_PATCH 控制；这里不自动删除
+	// 是否保留文件由调用方环境变量 XGIT_KEEP_PATCH 控制；这里不删除
 	return path, nil
 }
 
@@ -664,4 +678,9 @@ func detectDelete(s string) bool {
 func isTracked(repo, path string) bool {
     _, err := runGit(repo, nil, "ls-files", "--error-unmatch", path)
     return err == nil
+}
+
+func isTempPatch(rel string) bool {
+	base := filepath.Base(rel)
+	return strings.HasPrefix(base, ".xgit_") && strings.HasSuffix(base, ".patch")
 }
