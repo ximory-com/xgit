@@ -39,6 +39,10 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 	if !looksLikeDiff(diffText) {
 		return errors.New("git.diff: 输入不是有效的 diff（缺少 diff 头）")
 	}
+	// 👇👇 新增：校验每个 hunk 头是否带 -n,m +n,m
+	if err := validateHunkHeaders(diffText); err != nil {
+		return fmt.Errorf("git.diff: 无效 hunk 头：%w", err)
+	}
 
 	// 路径/新增删除特征（决定策略）
 	_, hasDevNull, hasNewMode, hasDelMode := parseDiffPaths(diffText)
@@ -76,7 +80,7 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 	changed, _ := collectChangedFiles(shadow, logger)
 	if len(changed) > 0 {
 		log("🧪 [影子] 预检：%d 个文件", len(changed))
-		if err := runPreflights(shadow, changed, logger); err != nil {
+		if err := runPreflights(shadow, changed, diffText, logger); err != nil {
 			log("❌ [影子] 预检失败：%v", err)
 			return err
 		}
@@ -173,7 +177,7 @@ func collectChangedFiles(repo string, logger DualLogger) ([]string, error) {
 }
 
 // runPreflights 跑注册的预检器（含 goFmtRunner -> 末尾仅一换行 + gofmt）
-func runPreflights(repo string, files []string, logger DualLogger) error {
+func runPreflights(repo string, files []string, diffText string, logger DualLogger) error {
 	log := func(f string, a ...any) { if logger != nil { logger.Log(f, a...) } }
 	for _, rel := range files {
 		rel = strings.TrimSpace(rel)
@@ -184,6 +188,12 @@ func runPreflights(repo string, files []string, logger DualLogger) error {
 		if _, err := os.Stat(filepath.Join(repo, rel)); err != nil && os.IsNotExist(err) {
 			continue
 		}
+		// 🔑 新增：删除补丁的 go 文件跳过预检
+		if strings.HasSuffix(rel, ".go") && shouldSkipGoPreflight(rel, diffText) {
+			log("🗑️ 跳过 go 预检（删除文件）：%s", rel)
+			continue
+		}
+
 		lang := preflight.DetectLangByExt(rel)
 		if lang == "" {
 			lang = "unknown"
@@ -446,4 +456,78 @@ func wrapPatchErrorWithContext(patchPath string, err error, logger DualLogger) e
 	}
 	// .rej 信息在调用层已有检查；这里仅返回拼接后的错误
 	return fmt.Errorf("%v%s", err, tail.String())
+}
+// ================= 新增：放在文件中工具函数区域 =================
+
+// shouldSkipGoPreflight 判断某文件在 diff 中是否纯删除，供 runPreflights 跳过 go 预检
+func shouldSkipGoPreflight(rel string, diffText string) bool {
+	lines := strings.Split(diffText, "\n")
+	inFile := false
+	onlyMinus := true
+	seenAny := false
+
+	for _, l := range lines {
+		// 进入对应文件块
+		if strings.HasPrefix(l, "--- a/") {
+			path := strings.TrimPrefix(strings.TrimSpace(l), "--- a/")
+			inFile = (path == rel)
+			onlyMinus = true
+			seenAny = false
+			continue
+		}
+		if !inFile {
+			continue
+		}
+		// 退出文件块
+		if strings.HasPrefix(l, "diff --git ") {
+			break
+		}
+		// hunk 行
+		if strings.HasPrefix(l, "@@") {
+			continue
+		}
+		if strings.HasPrefix(l, "+") {
+			onlyMinus = false
+			seenAny = true
+		}
+		if strings.HasPrefix(l, "-") || strings.HasPrefix(l, " ") {
+			seenAny = true
+		}
+	}
+	return inFile && seenAny && onlyMinus
+}
+
+// validateHunkHeaders 确保每个 @@ hunk 头都包含行号/行数区间：@@ -n[,m] +n[,m] @@
+func validateHunkHeaders(s string) error {
+	// 允许的最小形式：@@ -12 +34 @@（count 可省略），或 @@ -12,3 +34,5 @@
+	reOK := regexp.MustCompile(`^@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@(?:\s.*)?$`)
+
+	var bad []string
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		// 只检查以 @@ 开头的行
+		if !strings.HasPrefix(l, "@@") {
+			continue
+		}
+		if reOK.MatchString(l) {
+			continue
+		}
+		// 记录出问题的行（1-based 行号）
+		bad = append(bad, fmt.Sprintf("%d: %s", i+1, l))
+	}
+
+	if len(bad) == 0 {
+		return nil
+	}
+
+	// 给出修复提示
+	var b strings.Builder
+	b.WriteString("以下 hunk 头缺少行号区间（示例应为：@@ -1,3 +1,4 @@）：\n")
+	for _, x := range bad {
+		b.WriteString(" - ")
+		b.WriteString(x)
+		b.WriteString("\n")
+	}
+	b.WriteString("请在生成或手写补丁时，保证每个 hunk 头都有 -n[,m] 和 +n[,m]。建议用 `git diff --no-color --binary` 导出补丁以避免该问题。")
+	return errors.New(b.String())
 }

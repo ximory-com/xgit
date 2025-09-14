@@ -1,16 +1,21 @@
+// run_preflight.go
 package main
 
 import (
 	"fmt"
 	"os"
-	"strings"
 	"path/filepath"
+	"strings"
 
 	"xgit/apps/patch/preflight"
 )
 
 func runPreflightDryRun(repo string, patch *Patch, logger *DualLogger) error {
-	logf := func(format string, a ...any) { if logger != nil { logger.Log(format, a...) } }
+	logf := func(format string, a ...any) {
+		if logger != nil {
+			logger.Log(format, a...)
+		}
+	}
 
 	// 1) 建影子工作区
 	shadow, err := os.MkdirTemp("", "xgit_preflight_*")
@@ -52,7 +57,7 @@ func runPreflightDryRun(repo string, patch *Patch, logger *DualLogger) error {
 		if strings.HasSuffix(payload, "/") {
 			continue
 		}
-		// 以文件系统为准再过滤目录
+		// 以文件系统为准再过滤目录（影子根下）
 		full := filepath.Join(shadow, payload)
 		if fi, err := os.Stat(full); err == nil && fi.IsDir() {
 			continue
@@ -86,11 +91,20 @@ func preflightRun(repo string, files []string, logger *DualLogger) error {
 		if rel == "" {
 			continue
 		}
+		abs := filepath.Join(repo, rel)
+
+		// 删除后的文件不做预检（影子里不存在即判为删除）
+		if _, err := os.Stat(abs); err != nil && os.IsNotExist(err) {
+			logf("ℹ️ 跳过预检（文件已删除）：%s", rel)
+			continue
+		}
+
 		lang := preflight.DetectLangByExt(rel)
 		if lang == "" {
 			lang = "unknown"
 		}
 		logf("🧪 预检 %s (%s)", rel, lang)
+
 		if r := preflight.Lookup(rel); r != nil {
 			changed, err := r.Run(repo, rel, logf)
 			if err != nil {
