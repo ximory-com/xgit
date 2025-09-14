@@ -19,9 +19,9 @@ import (
 // - runGit(repo string, logger DualLogger, args ...string) (string, error)
 // - findRejects(repo string) ([]string, error)
 //
-// v3 变更：在真实仓库应用前，先在“影子 worktree”应用原始补丁 -> 影子里跑预检（含 gofmt 与末尾仅一换行修复）
+// v3 流程：在真实仓库应用前，先在“影子 worktree”应用原始补丁 -> 影子里跑预检（含 gofmt 与末尾仅一换行修复）
 // -> 用影子导出“规范化补丁” -> 再按策略集应用到真实仓库。
-// 好处：统一把 go 文件末尾换行/gofmt 问题在影子阶段修好，最大化降低 corrupt/预检不通过。
+// 这样把 go 文件末尾换行/gofmt 问题在影子阶段一次性修好，降低 corrupt/预检不通过。
 
 // Diff 应用 diffText 到 repo。
 func Diff(repo string, diffText string, logger DualLogger) error {
@@ -39,19 +39,19 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 	if !looksLikeDiff(diffText) {
 		return errors.New("git.diff: 输入不是有效的 diff（缺少 diff 头）")
 	}
-	// 👇👇 新增：校验每个 hunk 头是否带 -n,m +n,m
+	// 校验每个 hunk 头是否带 -n,m +n,m，避免 “patch with only garbage”
 	if err := validateHunkHeaders(diffText); err != nil {
 		return fmt.Errorf("git.diff: 无效 hunk 头：%w", err)
 	}
 
-	// 路径/新增删除特征（决定策略）
+	// 路径/新增删除特征（决定是否启用 3-way）
 	_, hasDevNull, hasNewMode, hasDelMode := parseDiffPaths(diffText)
 	allow3 := !(hasDevNull || hasNewMode || hasDelMode)
 
 	keep := os.Getenv("XGIT_KEEP_PATCH") == "1"
 	show := os.Getenv("XGIT_SHOW_PATCH") == "1"
 
-	// 2) 先把“原始补丁”写入临时文件（用于影子仓库尝试）
+	// 2) 把“原始补丁”写入临时文件（用于影子仓库尝试）
 	rawPatch, err := writeTempPatch(repo, diffText, keep)
 	if err != nil {
 		log("❌ git.diff 临时文件失败：%v", err)
@@ -68,8 +68,9 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 	}
 	defer cleanupShadow()
 
-	// 影子里先做意向 add（提升 --index 命中率）
+	// 影子里先做意向 add（提升 --index 命中率），并确保需要的父目录/前置文件存在
 	intentAddFromDiff(shadow, diffText, logger)
+	syncPrereqsToShadow(repo, shadow, diffText, logger)
 
 	log("📄 [影子] 正在应用原始补丁：%s", filepath.Base(rawPatch))
 	if err := applyWithStrategies(shadow, rawPatch, allow3, logger); err != nil {
@@ -97,7 +98,8 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 		log("ℹ️ [影子] 规范化后无改动需要应用。")
 		return nil
 	}
-	// 规范化补丁也要校验/决定策略
+
+	// 规范化补丁也要决定策略
 	_, nHasDevNull, nHasNewMode, nHasDelMode := parseDiffPaths(normText)
 	nAllow3 := !(nHasDevNull || nHasNewMode || nHasDelMode)
 
@@ -109,7 +111,6 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 	// 4) 在真实仓库应用“规范化补丁”
 	log("📄 git.diff 正在应用补丁：%s", filepath.Base(normPatch))
 	if err := applyWithStrategies(repo, normPatch, nAllow3, logger); err != nil {
-		// 打印错误上下文 & .rej
 		return wrapPatchErrorWithContext(normPatch, err, logger)
 	}
 	// 成功检查 .rej
@@ -157,6 +158,46 @@ func intentAddFromDiff(repo string, diffText string, logger DualLogger) {
 	}
 }
 
+// syncPrereqsToShadow：确保影子里存在需要的父目录/前置文件（主要为重命名/修改建立路径）
+func syncPrereqsToShadow(realRepo, shadow string, diffText string, logger DualLogger) {
+	pp, _, _, _ := parseDiffPaths(diffText)
+	mkParents := func(rel string) {
+		if rel == "/dev/null" || strings.TrimSpace(rel) == "" {
+			return
+		}
+		_ = os.MkdirAll(filepath.Join(shadow, filepath.Dir(rel)), 0o755)
+	}
+	for _, p := range pp.aPaths {
+		mkParents(p)
+	}
+	for _, p := range pp.bPaths {
+		mkParents(p)
+	}
+
+	// 若真实仓库有对应文件而影子缺失，则拷过去（为 rename/modify 提供基线）
+	copyIfExists := func(rel string) {
+		if rel == "/dev/null" || strings.TrimSpace(rel) == "" {
+			return
+		}
+		src := filepath.Join(realRepo, rel)
+		dst := filepath.Join(shadow, rel)
+		if _, err := os.Stat(src); err == nil {
+			if _, err := os.Stat(dst); os.IsNotExist(err) {
+				if data, e := os.ReadFile(src); e == nil {
+					_ = os.MkdirAll(filepath.Dir(dst), 0o755)
+					_ = os.WriteFile(dst, data, 0o644)
+				}
+			}
+		}
+	}
+	for _, p := range pp.aPaths {
+		copyIfExists(p)
+	}
+	for _, p := range pp.bPaths {
+		copyIfExists(p)
+	}
+}
+
 // collectChangedFiles 用 git status --porcelain 收集变更路径
 func collectChangedFiles(repo string, logger DualLogger) ([]string, error) {
 	out, err := runGit(repo, logger, "status", "--porcelain")
@@ -178,7 +219,11 @@ func collectChangedFiles(repo string, logger DualLogger) ([]string, error) {
 
 // runPreflights 跑注册的预检器（含 goFmtRunner -> 末尾仅一换行 + gofmt）
 func runPreflights(repo string, files []string, diffText string, logger DualLogger) error {
-	log := func(f string, a ...any) { if logger != nil { logger.Log(f, a...) } }
+	log := func(f string, a ...any) {
+		if logger != nil {
+			logger.Log(f, a...)
+		}
+	}
 	for _, rel := range files {
 		rel = strings.TrimSpace(rel)
 		if rel == "" {
@@ -188,7 +233,7 @@ func runPreflights(repo string, files []string, diffText string, logger DualLogg
 		if _, err := os.Stat(filepath.Join(repo, rel)); err != nil && os.IsNotExist(err) {
 			continue
 		}
-		// 🔑 新增：删除补丁的 go 文件跳过预检
+		// 删除补丁的 go 文件跳过预检（避免对已删除目标做 gofmt）
 		if strings.HasSuffix(rel, ".go") && shouldSkipGoPreflight(rel, diffText) {
 			log("🗑️ 跳过 go 预检（删除文件）：%s", rel)
 			continue
@@ -354,7 +399,7 @@ func buildStrategies(allow3Way bool) [][]string {
 			{"--whitespace=nowarn"},
 		}
 	}
-	// 新增/删除文件的场景：跳过 3-way
+	// 新增/删除文件：跳过 3-way
 	return [][]string{
 		{"--index", "--whitespace=nowarn"},
 		{"--whitespace=nowarn"},
@@ -424,12 +469,6 @@ func writeTempPatch(repo string, text string, keep bool) (string, error) {
 		return "", err
 	}
 	path := f.Name()
-	if !keep {
-		defer func() {
-			// 删除动作由调用者在 apply 成功/失败后统一处理更安全；
-			// 这里不 defer remove，避免提前删。调用者可设置 XGIT_KEEP_PATCH 控制保留。
-		}()
-	}
 	if _, err := f.WriteString(text); err != nil {
 		_ = f.Close()
 		return "", err
@@ -441,6 +480,7 @@ func writeTempPatch(repo string, text string, keep bool) (string, error) {
 	if err := f.Close(); err != nil {
 		return "", err
 	}
+	// 是否保留文件由上层通过 XGIT_KEEP_PATCH 控制；这里不自动删除
 	return path, nil
 }
 
@@ -454,10 +494,10 @@ func wrapPatchErrorWithContext(patchPath string, err error, logger DualLogger) e
 			tail.WriteString(ctx)
 		}
 	}
-	// .rej 信息在调用层已有检查；这里仅返回拼接后的错误
 	return fmt.Errorf("%v%s", err, tail.String())
 }
-// ================= 新增：放在文件中工具函数区域 =================
+
+// ================== 影子/预检辅助 ==================
 
 // shouldSkipGoPreflight 判断某文件在 diff 中是否纯删除，供 runPreflights 跳过 go 预检
 func shouldSkipGoPreflight(rel string, diffText string) bool {
@@ -528,6 +568,6 @@ func validateHunkHeaders(s string) error {
 		b.WriteString(x)
 		b.WriteString("\n")
 	}
-	b.WriteString("请在生成或手写补丁时，保证每个 hunk 头都有 -n[,m] 和 +n[,m]。建议用 `git diff --no-color --binary` 导出补丁以避免该问题。")
+	b.WriteString("请在生成或手写补丁时，保证每个 hunk 头都有 -n[,m] 和 +n[,m]。建议用 `git diff --no-color --binary` 导出补丁。")
 	return errors.New(b.String())
 }

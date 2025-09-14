@@ -88,7 +88,7 @@ func ParsePatch(data string, eof string) (*Patch, error) {
 		switch kind {
 		case "file":
 			switch action {
-			case "write", "append", "prepend", "replace", "delete", "move", "chmod", "eol", "image", "binary", "diff":
+			case "write", "append", "prepend", "replace", "delete", "move", "chmod", "eol", "image", "binary":
 				// ok
 			default:
 				return fmt.Errorf("未知指令: %s", cmd)
