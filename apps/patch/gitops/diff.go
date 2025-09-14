@@ -150,37 +150,41 @@ func addShadowWorktree(repo string, logger DualLogger) (shadow string, cleanup f
 	return shadow, cleanup, nil
 }
 
-// intentAddFromDiff 对 a/ 和 b/ 路径、以及 rename from/to 的路径做 git add -N
+// intentAddFromDiff：只对 b/ 路径和 rename to/from 做 add -N。
+// 不再对 a/ 路径 add -N，避免纯删除时把旧路径标成“意向添加”。
 func intentAddFromDiff(repo string, diffText string, logger DualLogger) {
 	paths, _, _, _ := parseDiffPaths(diffText)
 
 	addN := func(p string) {
 		p = strings.TrimSpace(p)
-		if p == "" || p == "/dev/null" {
-			return
-		}
-		// 忽略明显目录
-		if strings.HasSuffix(p, "/") {
+		if p == "" || p == "/dev/null" || strings.HasSuffix(p, "/") {
 			return
 		}
 		_, _ = runGit(repo, logger, "add", "-N", p)
 	}
 
-	// 1) 统一处理 a/… 与 b/… 路径
-	for _, p := range paths.aPaths {
-		addN(p)
-	}
-	for _, p := range paths.bPaths {
+	// 去重
+	seen := make(map[string]struct{})
+	maybeAdd := func(p string) {
+		if _, ok := seen[p]; ok {
+			return
+		}
+		seen[p] = struct{}{}
 		addN(p)
 	}
 
-	// 2) 解析 rename from/to 并处理
-	rFrom, rTo := parseRenamePairs(diffText)
+	// 1) 只处理 b/…（新增/修改/重命名后的新路径）
+	for _, p := range paths.bPaths {
+		maybeAdd(p)
+	}
+
+	// 2) 解析 rename from/to 并处理（两端都处理更稳妥）
+	rFrom, rTo := parseRenamePairs(diffText) // 确保你已实现它
 	for _, p := range rFrom {
-		addN(p)
+		maybeAdd(p)
 	}
 	for _, p := range rTo {
-		addN(p)
+		maybeAdd(p)
 	}
 }
 
