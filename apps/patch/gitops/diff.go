@@ -45,7 +45,24 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 	}
 
 	// 路径/新增删除特征（决定是否启用 3-way）
-	_, hasDevNull, hasNewMode, hasDelMode := parseDiffPaths(diffText)
+	paths, hasDevNull, hasNewMode, hasDelMode := parseDiffPaths(diffText)
+
+	// 删除校验
+	if hasDelMode {
+		for _, p := range paths.aPaths {
+			if p != "/dev/null" && !isTracked(repo, p) {
+				return fmt.Errorf("git.diff: 删除失败，文件 %s 未在 Git 管理范围", p)
+			}
+		}
+	}
+
+	// 改名校验
+	rFrom, _ := parseRenamePairs(diffText)
+	for _, p := range rFrom {
+		if !isTracked(repo, p) {
+			return fmt.Errorf("git.diff: 改名失败，源文件 %s 未在 Git 管理范围", p)
+		}
+	}	
 	allow3 := !(hasDevNull || hasNewMode || hasDelMode)
 	isDelete := detectDelete(diffText) // 👈 新增：识别是否为“删除文件”场景
 
@@ -623,7 +640,7 @@ func validateHunkHeaders(s string) error {
 	b.WriteString("请在生成或手写补丁时，保证每个 hunk 头都有 -n[,m] 和 +n[,m]。建议用 `git diff --no-color --binary` 导出补丁。")
 	return errors.New(b.String())
 }
-// ========= [新增] detectDelete：判断 diff 是否包含“删除文件” =========
+
 func detectDelete(s string) bool {
 	lines := strings.Split(s, "\n")
 	for _, l := range lines {
@@ -643,4 +660,8 @@ func detectDelete(s string) bool {
 	}
 	return false
 }
-// ===========================================================================
+
+func isTracked(repo, path string) bool {
+    _, err := runGit(repo, nil, "ls-files", "--error-unmatch", path)
+    return err == nil
+}
