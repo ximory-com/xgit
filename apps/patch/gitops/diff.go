@@ -17,11 +17,11 @@ import (
 // - runGit(repo string, logger DualLogger, args ...string) (string, error)
 // - findRejects(repo string) ([]string, error)
 //
-// 设计（lean，无开关）：
-// - 不建影子 worktree，不做语言级预检/修复（gofmt/EOL等）。
-// - 最小必要：清洗补丁文本 -> intent add -N -> git apply（多策略）。
+// 设计（lean，无影子、无语言预检）：
+// - 清洗补丁文本 -> intent add -N -> git apply（按 diff 类型选择策略）。
 // - 新增/删除/重命名：跳过 3-way；纯修改：优先 3-way。
-// - 失败时打印 git 输出 + 出错行上下文（±20），并报告 .rej（如有）。
+// - 失败时打印 git 输出与出错行上下文（±20），并报告 .rej（如有）。
+// - 成功后逐个文件打印：新建/删除/修改/改名 <路径/对>。
 
 // Diff 应用 diffText 到 repo
 func Diff(repo string, diffText string, logger DualLogger) error {
@@ -48,24 +48,91 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 	}
 	defer cleanup()
 
-	// 3) 针对新增/重命名做 intent add -N，提升 --index 命中率
+	log("📄 git.diff 正在应用补丁：%s", filepath.Base(patchPath))
+
+	// 3) 针对新增/重命名做 intent add -N，提升 --index 命中率（即使策略里先直贴，也不冲突）
 	intentAddFromDiff(repo, diffText, logger)
 
-	// 4) 选择策略并尝试应用（只 apply 一次，不重复）
+	// 4) 选择策略并尝试应用
 	strategies := buildStrategiesFromDiff(diffText)
+	var lastOut string
+	var lastErr error
+	for i, args := range strategies {
+		full := append([]string{"apply"}, append(args, patchPath)...)
+		out, err := runGit(repo, logger, full...)
+		if err != nil {
+			lastOut, lastErr = out, err
+			log("⚠️ git %v 失败（策略 #%d）：%v", args, i+1, err)
+			if line := extractPatchErrorLine(out); line > 0 {
+				if ctx := readPatchContext(patchPath, line, 20); ctx != "" {
+					log("🧭 出错行上下文（±20）：\n%s", ctx)
+				}
+			}
+			continue
+		}
+		// 成功后检查是否生成 .rej
+		if rejs, _ := findRejects(repo); len(rejs) > 0 {
+			var b strings.Builder
+			for _, r := range rejs {
+				b.WriteString(" - ")
+				b.WriteString(r)
+				b.WriteString("\n")
+			}
+			return fmt.Errorf("git.diff: 存在未能应用的 hunk（生成 .rej）：\n%s", b.String())
+		}
 
-	log("📄 git.diff 正在应用补丁：%s", filepath.Base(patchPath))
-	if err := applyWithStrategies(repo, patchPath, strategies, logger); err != nil {
-		return wrapPatchErrorWithContext(patchPath, err, logger)
+		// ✨ 成功：解析文件清单并逐条输出（对齐：新建/删除/修改/改名）
+		adds, dels, mods, renames := summarizeDiffFiles(diffText)
+		printed := false
+		if len(adds) > 0 {
+			for _, f := range adds {
+				log("✅ git.diff 完成（策略 #%d）新建  %s", i+1, f)
+				printed = true
+			}
+		}
+		if len(dels) > 0 {
+			for _, f := range dels {
+				log("✅ git.diff 完成（策略 #%d）删除  %s", i+1, f)
+				printed = true
+			}
+		}
+		if len(mods) > 0 {
+			for _, f := range mods {
+				log("✅ git.diff 完成（策略 #%d）修改  %s", i+1, f)
+				printed = true
+			}
+		}
+		if len(renames) > 0 {
+			for _, pair := range renames {
+				log("✅ git.diff 完成（策略 #%d）改名  %s → %s", i+1, pair[0], pair[1])
+				printed = true
+			}
+		}
+		if !printed {
+			log("✅ git.diff 完成（策略 #%d）", i+1)
+		}
+		return nil
 	}
 
-	log("✅ git.diff 完成")
-	return nil
+	// 5) 全部失败
+	if rejs, _ := findRejects(repo); len(rejs) > 0 {
+		var b strings.Builder
+		for _, r := range rejs {
+			b.WriteString(" - ")
+			b.WriteString(r)
+			b.WriteString("\n")
+		}
+		return fmt.Errorf("%v\n%s\ngit.diff: 同时检测到 .rej 文件：\n%s", lastErr, lastOut, b.String())
+	}
+	if lastErr != nil {
+		return fmt.Errorf("%v\n%s", lastErr, lastOut)
+	}
+	return errors.New("git.diff: git apply 失败（未知原因）")
 }
 
 // ---------- 策略 & 辅助 ----------
 
-// 从完整 diff 文本判断是否包含新增/删除/重命名
+// analyzeDiffKinds：从完整 diff 文本判断是否包含新增/删除/重命名
 func analyzeDiffKinds(s string) (hasAddOrDelete bool, hasRename bool) {
 	lines := strings.Split(s, "\n")
 	for _, l := range lines {
@@ -113,7 +180,7 @@ func intentAddFromDiff(repo string, diffText string, logger DualLogger) {
 			return
 		}
 		// 忽略明显目录
-	if strings.HasSuffix(p, "/") {
+		if strings.HasSuffix(p, "/") {
 			return
 		}
 		_, _ = runGit(repo, logger, "add", "-N", p)
@@ -147,48 +214,6 @@ func parseRenamePairs(s string) (froms []string, tos []string) {
 		}
 	}
 	return
-}
-
-// 执行策略集合（含 .rej 检查与报错上下文）
-func applyWithStrategies(repo string, patchPath string, strategies [][]string, logger DualLogger) error {
-	var lastOut string
-	var lastErr error
-
-	for i, args := range strategies {
-		full := append([]string{"apply"}, append(args, patchPath)...)
-		out, err := runGit(repo, logger, full...)
-		if err != nil {
-			lastOut, lastErr = out, err
-			if logger != nil {
-				logger.Log("⚠️ git %v 失败（策略 #%d）：%v", args, i+1, err)
-			}
-			// 尝试从错误输出里提取“at line N”，打印上下文
-			if line := extractPatchErrorLine(out); line > 0 {
-				if ctx := readPatchContext(patchPath, line, 20); ctx != "" && logger != nil {
-					logger.Log("🧭 出错行上下文（±20）：\n%s", ctx)
-				}
-			}
-			continue
-		}
-		// 成功后检查 .rej
-		if rejs, _ := findRejects(repo); len(rejs) > 0 {
-			var b strings.Builder
-			for _, r := range rejs {
-				b.WriteString(" - ")
-				b.WriteString(r)
-				b.WriteString("\n")
-			}
-			return fmt.Errorf("git.diff: 存在未能应用的 hunk（生成 .rej）：\n%s", b.String())
-		}
-		if logger != nil {
-			logger.Log("✅ git.diff 完成（策略 #%d）", i+1)
-		}
-		return nil
-	}
-	if lastErr != nil {
-		return fmt.Errorf("%v\n%s", lastErr, lastOut)
-	}
-	return errors.New("git.diff: git apply 失败（未知原因）")
 }
 
 // sanitizeDiff 移除 ```diff / ```patch 围栏，trim 两端空白，并确保末尾有换行
@@ -258,6 +283,85 @@ func parseDiffPaths(s string) (paths parsedPaths, hasDevNull bool, hasNewFileMod
 	return
 }
 
+// summarizeDiffFiles：粗略解析文件粒度的新建/删除/修改/改名
+func summarizeDiffFiles(s string) (adds, dels, mods []string, renames [][2]string) {
+	lines := strings.Split(s, "\n")
+	var lastNewFile, lastDeletedFile bool
+	var renameFrom, renameTo string
+
+	for _, raw := range lines {
+		t := strings.TrimSpace(raw)
+
+		// 标志位：进入某个文件块后，new/deleted 的下一条路径行生效
+		if strings.HasPrefix(t, "new file mode ") {
+			lastNewFile = true
+			lastDeletedFile = false
+			continue
+		}
+		if strings.HasPrefix(t, "deleted file mode ") {
+			lastDeletedFile = true
+			lastNewFile = false
+			continue
+		}
+
+		// 路径行
+		if strings.HasPrefix(t, "+++ ") {
+			path := strings.TrimPrefix(t, "+++ ")
+			if path == "/dev/null" {
+				// b 为 /dev/null，不是新增
+			} else if strings.HasPrefix(path, "b/") {
+				p := strings.TrimPrefix(path, "b/")
+				if lastNewFile {
+					adds = append(adds, p)
+					lastNewFile = false
+				}
+			}
+			continue
+		}
+		if strings.HasPrefix(t, "--- ") {
+			path := strings.TrimPrefix(t, "--- ")
+			if path == "/dev/null" {
+				// a 为 /dev/null，不是删除
+			} else if strings.HasPrefix(path, "a/") {
+				p := strings.TrimPrefix(path, "a/")
+				if lastDeletedFile {
+					dels = append(dels, p)
+					lastDeletedFile = false
+				}
+			}
+			continue
+		}
+
+		// 普通修改：diff --git a/x b/x 且没有 new/deleted/rename 情况
+		if strings.HasPrefix(t, "diff --git a/") && strings.Contains(t, " b/") {
+			fields := strings.Fields(t)
+			if len(fields) >= 3 {
+				ap := strings.TrimPrefix(fields[1], "a/")
+				bp := strings.TrimPrefix(fields[2], "b/")
+				if ap == bp && ap != "/dev/null" {
+					mods = append(mods, ap)
+				}
+			}
+			continue
+		}
+
+		// 重命名
+		if strings.HasPrefix(t, "rename from ") {
+			renameFrom = strings.TrimSpace(strings.TrimPrefix(t, "rename from "))
+			continue
+		}
+		if strings.HasPrefix(t, "rename to ") {
+			renameTo = strings.TrimSpace(strings.TrimPrefix(t, "rename to "))
+			if renameFrom != "" && renameTo != "" {
+				renames = append(renames, [2]string{renameFrom, renameTo})
+				renameFrom, renameTo = "", ""
+			}
+			continue
+		}
+	}
+	return
+}
+
 // extractPatchErrorLine：尝试从 git 输出中提取 “at line N”
 func extractPatchErrorLine(out string) int {
 	re := regexp.MustCompile(`(?i)\bat line\s+(\d+)\b`)
@@ -270,7 +374,7 @@ func extractPatchErrorLine(out string) int {
 	re2 := regexp.MustCompile(`(?i)at line\s+(\d+)`)
 	if m := re2.FindStringSubmatch(out); len(m) == 2 {
 		if n, err := strconv.Atoi(m[1]); err == nil {
-		 return n
+			return n
 		}
 	}
 	return 0
@@ -327,17 +431,4 @@ func writeTempPatch(repo string, text string) (string, func(), error) {
 
 	cleanup := func() { _ = os.Remove(path) }
 	return path, cleanup, nil
-}
-
-// wrapPatchErrorWithContext：把 git apply 错误输出补充上下文
-func wrapPatchErrorWithContext(patchPath string, err error, logger DualLogger) error {
-	out := fmt.Sprintf("%v", err)
-	var tail strings.Builder
-	if line := extractPatchErrorLine(out); line > 0 {
-		if ctx := readPatchContext(patchPath, line, 20); ctx != "" {
-			tail.WriteString("\n🧭 出错行上下文（±20）：\n")
-			tail.WriteString(ctx)
-		}
-	}
-	return fmt.Errorf("%v%s", err, tail.String())
 }
