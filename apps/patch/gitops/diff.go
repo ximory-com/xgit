@@ -3,6 +3,8 @@ package gitops
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -18,10 +20,11 @@ import (
 // - findRejects(repo string) ([]string, error)
 //
 // 设计（lean，无影子、无语言预检）：
-// - 清洗补丁文本 -> intent add -N -> git apply（按 diff 类型选择策略）。
-// - 新增/删除/重命名：跳过 3-way；纯修改：优先 3-way。
+// - 清洗补丁文本 -> intent add -N -> 预检(--check --recount) -> git apply（按 diff 类型选择策略）。
+// - 新增/删除/重命名：跳过 3-way；纯修改：优先 3-way；所有策略统一 --recount。
 // - 失败时打印 git 输出与出错行上下文（±20），并报告 .rej（如有）。
-// - 成功后逐个文件打印：新建/删除/修改/改名 <路径/对>。
+// - 成功后逐个文件打印：新建/删除/修改/改名 <路径/对>；
+//   对“新建文件”执行：补丁 + 行数 == 工作区实际行数 的强校验。
 
 // Diff 应用 diffText 到 repo
 func Diff(repo string, diffText string, logger DualLogger) error {
@@ -34,26 +37,76 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 		return errors.New("git.diff: 空 diff")
 	}
 
+	// 0) 处理前统计
+	countLF := func(s string) int { return strings.Count(s, "\n") }
+	countCR := func(s string) int { return strings.Count(s, "\r") }
+	hasFence := func(s string) (lead, tail bool) {
+		lines := strings.Split(s, "\n")
+		if len(lines) > 0 && strings.HasPrefix(strings.TrimSpace(lines[0]), "```") {
+			lead = true
+		}
+		if len(lines) > 0 && strings.HasPrefix(strings.TrimSpace(lines[len(lines)-1]), "```") {
+			tail = true
+		}
+		return
+	}
+	sha8 := func(s string) string {
+		h := sha256.Sum256([]byte(s))
+		return hex.EncodeToString(h[:])[:8]
+	}
+
+	orig := diffText
+	origLF, origCR := countLF(orig), countCR(orig)
+	leadFence, tailFence := hasFence(orig)
+	origHash := sha8(orig)
+	log("📝 处理前 diff: %d 字节, %d 行(\\n), %d 个\\r, fence[首=%v,尾=%v], hash=%s",
+		len(orig), origLF, origCR, leadFence, tailFence, origHash)
+
 	// 1) 预处理并基本校验
 	diffText = sanitizeDiff(diffText)
+
+	newLF, newCR := countLF(diffText), countCR(diffText)
+	newHash := sha8(diffText)
+	log("📝 处理后 diff: %d 字节, %d 行(\\n), %d 个\\r, hash=%s",
+		len(diffText), newLF, newCR, newHash)
+
+	// 清洗后仍需“像 diff”
 	if !looksLikeDiff(diffText) {
+		if looksLikeDiff(orig) {
+			return fmt.Errorf("git.diff: 清洗后不再像有效 diff（前后hash=%s→%s）", origHash, newHash)
+		}
 		return errors.New("git.diff: 输入不是有效的 diff（缺少 diff 头）")
 	}
 
-	// 2) 写临时补丁（不保留、不预览）
+	// 围栏行数的合理性（只允许去掉 0/1/2 行围栏）
+	if delta := origLF - newLF; delta < 0 || delta > 2 {
+		log("⚠️ 清洗后行数变化异常：origLF=%d, newLF=%d（可能非围栏导致的行丢失）", origLF, newLF)
+	}
+
+	// 2) 写临时补丁（写后回读校验：hash+行数）
 	patchPath, cleanup, err := writeTempPatch(repo, diffText)
 	if err != nil {
 		log("❌ git.diff 临时文件失败：%v", err)
 		return err
 	}
 	defer cleanup()
-
 	log("📄 git.diff 正在应用补丁：%s", filepath.Base(patchPath))
 
 	// 3) 针对新增/重命名做 intent add -N，提升 --index 命中率（即使策略里先直贴，也不冲突）
 	intentAddFromDiff(repo, diffText, logger)
 
-	// 4) 选择策略并尝试应用
+	// 3.5) 预检：在正式 apply 前先 --check --recount
+	if err := preflightCheck(repo, patchPath, logger); err != nil {
+		// 若能解析出报错行，打印上下文
+		if line := extractPatchErrorLine(err.Error()); line > 0 {
+			if ctx := readPatchContext(patchPath, line, 20); ctx != "" {
+				log("🧭 预检失败，出错行上下文（±20）：\n%s", ctx)
+			}
+		}
+		return err
+	}
+
+	// 4) 选择策略并尝试应用（统一 --recount）
 	strategies := buildStrategiesFromDiff(diffText)
 	var lastOut string
 	var lastErr error
@@ -111,6 +164,20 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 		if !printed {
 			log("✅ git.diff 完成（策略 #%d）", i+1)
 		}
+
+		// 4.5) 新建文件强校验：补丁“+行数”应等于工作区实际行数
+		for _, p := range adds {
+			expect := countPlusLinesForFile(diffText, p)
+			if expect <= 0 {
+				// 未能统计出 “+” 行数，给出提示但不中断（视为免核对）
+				log("ℹ️ 新建 %s：跳过行数校验（未找到 '+' 行）", p)
+				continue
+			}
+			if err := ensureWorktreeLines(repo, p, expect); err != nil {
+				return fmt.Errorf("git.diff: 新建文件内容校验失败 %s：%w", p, err)
+			}
+			log("🔎 校验通过：%s 行数=%d", p, expect)
+		}
 		return nil
 	}
 
@@ -151,22 +218,22 @@ func analyzeDiffKinds(s string) (hasAddOrDelete bool, hasRename bool) {
 	return
 }
 
-// 根据 diff 类型选择策略序列
+// 根据 diff 类型选择策略序列（统一加 --recount）
 func buildStrategiesFromDiff(s string) [][]string {
 	hasAddOrDelete, hasRename := analyzeDiffKinds(s)
 	// 重命名/新增/删除：跳过 3-way
 	if hasAddOrDelete || hasRename {
 		return [][]string{
-			{"--whitespace=nowarn"},            // 直贴
-			{"--index", "--whitespace=nowarn"}, // 如需更新 index（存在时生效）
+			{"--recount", "--whitespace=nowarn"},            // 直贴
+			{"--index", "--recount", "--whitespace=nowarn"}, // 如需更新 index（存在时生效）
 		}
 	}
 	// 纯修改：优先 3way 提高成功率
 	return [][]string{
-		{"--index", "--3way", "--whitespace=nowarn"},
-		{"--3way", "--whitespace=nowarn"},
-		{"--index", "--whitespace=nowarn"},
-		{"--whitespace=nowarn"},
+		{"--index", "--3way", "--recount", "--whitespace=nowarn"},
+		{"--3way", "--recount", "--whitespace=nowarn"},
+		{"--index", "--recount", "--whitespace=nowarn"},
+		{"--recount", "--whitespace=nowarn"},
 	}
 }
 
@@ -217,22 +284,22 @@ func parseRenamePairs(s string) (froms []string, tos []string) {
 }
 
 // sanitizeDiff 只做最小化处理：
-// 1) 可选：剥掉首尾 ```...``` 围栏行（不动中间内容）
+// 1) 剥掉首尾 ```...``` 围栏行（支持 ```diff / ```patch）
 // 2) 归一化换行: \r\n / \r -> \n
 // 3) 确保末尾有且仅有一个 '\n'
 // 绝不 TrimSpace、绝不改动任何以 '+', '-', ' ' 开头的 hunk 行
 func sanitizeDiff(s string) string {
-	// 不改动原始空白，只处理围栏
+	// 剥离 Markdown 围栏（保留正文原样）
 	if strings.HasPrefix(s, "```") {
 		lines := strings.Split(s, "\n")
-		// 去掉首行围栏
-		if len(lines) > 0 && strings.HasPrefix(lines[0], "```") {
+		// 去掉首行围栏（``` 或 ```diff/patch）
+		if len(lines) > 0 && strings.HasPrefix(strings.TrimSpace(lines[0]), "```") {
 			lines = lines[1:]
 		}
 		// 若最后一行是围栏，也去掉
 		if len(lines) > 0 {
-			last := lines[len(lines)-1]
-			if strings.HasPrefix(strings.TrimSpace(last), "```") && strings.TrimSpace(last) == "```" {
+			last := strings.TrimSpace(lines[len(lines)-1])
+			if strings.HasPrefix(last, "```") && last == "```" {
 				lines = lines[:len(lines)-1]
 			}
 		}
@@ -418,6 +485,7 @@ func readPatchContext(path string, line, around int) string {
 }
 
 // writeTempPatch 把文本写入 repo 下的临时 .patch 文件，并返回路径和清理函数
+// 写入后会回读校验 hash + 行数，防止写盘污染导致内容被截断
 func writeTempPatch(repo string, text string) (string, func(), error) {
 	dir := repo
 	if strings.TrimSpace(dir) == "" {
@@ -428,6 +496,9 @@ func writeTempPatch(repo string, text string) (string, func(), error) {
 		return "", nil, err
 	}
 	path := f.Name()
+
+	// 预计算 hash 与行数
+	wantHash, wantLines := hashAndNLines(text)
 
 	if _, err := f.WriteString(text); err != nil {
 		_ = f.Close()
@@ -441,6 +512,88 @@ func writeTempPatch(repo string, text string) (string, func(), error) {
 		return "", nil, err
 	}
 
+	// 回读校验
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", nil, err
+	}
+	gotHash, gotLines := hashAndNLines(string(data))
+	if gotHash != wantHash || gotLines != wantLines {
+		_ = os.Remove(path)
+		return "", nil, fmt.Errorf("patch 回读校验失败：hash %s→%s, 行数 %d→%d", wantHash[:8], gotHash[:8], wantLines, gotLines)
+	}
+
 	cleanup := func() { _ = os.Remove(path) }
 	return path, cleanup, nil
+}
+
+// NEW: 计算 sha256 与 \n 行数（便于写盘后回读比对）
+func hashAndNLines(s string) (sum string, n int) {
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			n++
+		}
+	}
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:]), n
+}
+
+// NEW: 预检 – 在正式 apply 前先 --check --recount
+func preflightCheck(repo, patchPath string, logger DualLogger) error {
+	_, err := runGit(repo, logger, "apply", "--check", "--recount", "--verbose", patchPath)
+	if err != nil {
+		return fmt.Errorf("git apply --check 失败：%w", err)
+	}
+	return nil
+}
+
+// NEW: 统计某个 b/<path> 文件在补丁中的 '+' 行数（不含 '+++')
+func countPlusLinesForFile(diffText, repoRelPath string) int {
+	var inTarget, inHunk bool
+	lines := strings.Split(diffText, "\n")
+	plus := 0
+	for _, ln := range lines {
+		if strings.HasPrefix(ln, "diff --git ") {
+			inTarget, inHunk = false, false
+			// diff --git a/xxx b/xxx
+			if strings.Contains(ln, " b/"+repoRelPath) {
+				inTarget = true
+			}
+			continue
+		}
+		if !inTarget {
+			continue
+		}
+		if strings.HasPrefix(ln, "@@ ") {
+			inHunk = true
+			continue
+		}
+		if strings.HasPrefix(ln, "diff --git ") {
+			inHunk = false
+			continue
+		}
+		if !inHunk {
+			continue
+		}
+		if strings.HasPrefix(ln, "+") && !strings.HasPrefix(ln, "+++") {
+			plus++
+		}
+	}
+	return plus
+}
+
+// NEW: 读取工作区文件行数并与期望对比；允许“末行无换行”边界
+func ensureWorktreeLines(repo, repoRelPath string, expect int) error {
+	data, err := os.ReadFile(filepath.Join(repo, repoRelPath))
+	if err != nil {
+		return err
+	}
+	got := bytes.Count(data, []byte{'\n'})
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		got++
+	}
+	if got != expect {
+		return fmt.Errorf("行数不一致：期望 %d，实际 %d", expect, got)
+	}
+	return nil
 }
