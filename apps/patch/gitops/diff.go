@@ -92,8 +92,13 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 	defer cleanup()
 	log("📄 git.diff 正在应用补丁：%s", filepath.Base(patchPath))
 
-	// 3) 针对新增/重命名做 intent add -N，提升 --index 命中率（即使策略里先直贴，也不冲突）
+	// 3) 针对新增/重命名做 intent add -N
 	intentAddFromDiff(repo, diffText, logger)
+
+	// 3.2) 文件系统预检：新增/修改/删除/改名的存在性约束
+	if err := fsPreflight(repo, diffText, logger); err != nil {
+		return err
+	}
 
 	// 3.5) 预检：在正式 apply 前先 --check --recount
 	if err := preflightCheck(repo, patchPath, logger); err != nil {
@@ -596,4 +601,78 @@ func ensureWorktreeLines(repo, repoRelPath string, expect int) error {
 		return fmt.Errorf("行数不一致：期望 %d，实际 %d", expect, got)
 	}
 	return nil
+}
+
+// fsPreflight：对补丁涉及的目标做本地文件系统存在性校验
+// 规则：
+//  A(新增)  -> 目标文件若存在 => FAIL（不执行）
+//  M(修改)  -> 目标文件若不存在 => FAIL（不执行）
+//  D(删除)  -> 目标文件若不存在 => FAIL（不执行）
+//  R(改名)  -> from 不存在 => FAIL；to 若已存在 => FAIL（避免覆盖）
+//
+// 注意：这里基于 summarizeDiffFiles(diffText) 的结果；
+//       若你的 diff 里有同一文件同补丁先 A 再 M 之类复杂操作，建议改为按块解析。
+//       常规新建/修改/删除/改名场景，这个足够稳。
+func fsPreflight(repo, diffText string, logger DualLogger) error {
+    log := func(format string, a ...any) {
+        if logger != nil {
+            logger.Log(format, a...)
+        }
+    }
+
+    adds, dels, mods, renames := summarizeDiffFiles(diffText)
+
+    type viol struct{ kind, path, more string }
+    var conflicts []viol
+
+    exists := func(p string) bool {
+        st, err := os.Stat(filepath.Join(repo, p))
+        return err == nil && !st.IsDir()
+    }
+
+    // 新增：目标不得已存在
+    for _, p := range adds {
+        if exists(p) {
+            conflicts = append(conflicts, viol{"A", p, "目标已存在"})
+        }
+    }
+
+    // 修改：目标必须已存在
+    for _, p := range mods {
+        if !exists(p) {
+            conflicts = append(conflicts, viol{"M", p, "目标不存在"})
+        }
+    }
+
+    // 删除：目标必须已存在
+    for _, p := range dels {
+        if !exists(p) {
+            conflicts = append(conflicts, viol{"D", p, "目标不存在"})
+        }
+    }
+
+    // 改名：from 必须存在；to 不得存在（避免覆盖）
+    for _, pr := range renames {
+        from, to := pr[0], pr[1]
+        if !exists(from) {
+            conflicts = append(conflicts, viol{"R", from, "rename from 不存在"})
+        }
+        if exists(to) {
+            conflicts = append(conflicts, viol{"R", to, "rename to 已存在"})
+        }
+    }
+
+    if len(conflicts) == 0 {
+        log("🔒 预检：文件存在性通过（A/M/D/R）")
+        return nil
+    }
+
+    // 打印冲突清单并中止
+    var b strings.Builder
+    b.WriteString("git.diff: 文件存在性预检失败：\n")
+    for _, c := range conflicts {
+        fmt.Fprintf(&b, " - [%s] %s：%s\n", c.kind, c.path, c.more)
+    }
+    log("❌ %s", b.String())
+    return errors.New(b.String())
 }
