@@ -67,3 +67,20 @@ section.hero img.logo,
   display: block !important;
   margin: 0 auto 16px !important;
 }
+
+/* ===== Explicit sizing by actual classes in HTML ===== */
+/* Topbar mini logo */
+.topbar img.logo-mini {
+  height: 32px !important;
+  width: auto !important;
+  vertical-align: middle !important;
+}
+
+/* Hero main logo */
+.hero img.logo-hero {
+  display: block !important;
+  max-width: 120px !important;
+  width: auto !important;
+  height: auto !important;
+  margin: 0 auto 16px !important;
+}
