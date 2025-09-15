@@ -216,23 +216,35 @@ func parseRenamePairs(s string) (froms []string, tos []string) {
 	return
 }
 
-// sanitizeDiff 移除 ```diff / ```patch 围栏，trim 两端空白，并确保末尾有换行
+// sanitizeDiff 只做最小化处理：
+// 1) 可选：剥掉首尾 ```...``` 围栏行（不动中间内容）
+// 2) 归一化换行: \r\n / \r -> \n
+// 3) 确保末尾有且仅有一个 '\n'
+// 绝不 TrimSpace、绝不改动任何以 '+', '-', ' ' 开头的 hunk 行
 func sanitizeDiff(s string) string {
-	s = strings.TrimSpace(s)
-	// 剥离三反引号围栏
+	// 不改动原始空白，只处理围栏
 	if strings.HasPrefix(s, "```") {
 		lines := strings.Split(s, "\n")
-		if len(lines) >= 2 && strings.HasPrefix(strings.TrimSpace(lines[0]), "```") {
-			if strings.HasPrefix(strings.TrimSpace(lines[len(lines)-1]), "```") {
-				lines = lines[1 : len(lines)-1]
-				s = strings.Join(lines, "\n")
+		// 去掉首行围栏
+		if len(lines) > 0 && strings.HasPrefix(lines[0], "```") {
+			lines = lines[1:]
+		}
+		// 若最后一行是围栏，也去掉
+		if len(lines) > 0 {
+			last := lines[len(lines)-1]
+			if strings.HasPrefix(strings.TrimSpace(last), "```") && strings.TrimSpace(last) == "```" {
+				lines = lines[:len(lines)-1]
 			}
 		}
+		s = strings.Join(lines, "\n")
 	}
-	s = strings.TrimSpace(s)
-	if !strings.HasSuffix(s, "\n") {
-		s += "\n"
-	}
+
+	// 归一化换行（不动行内空白）
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+
+	// 确保末尾恰好一个换行：先去掉所有末尾的 \n，再补一个
+	s = strings.TrimRight(s, "\n") + "\n"
 	return s
 }
 
