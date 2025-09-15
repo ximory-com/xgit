@@ -1,5 +1,0 @@
-app: xgit
-env: prod
-features:
-  - modify-tests
-  - config-updated
