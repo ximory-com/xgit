@@ -1,0 +1,8 @@
+{
+  "buildCommand": "",
+  "outputDirectory": ".",
+  "ignoreCommand": "bash scripts/vercel-ignore.sh",
+  "cleanUrls": true,
+  "trailingSlash": false
+}
+
