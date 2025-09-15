@@ -747,24 +747,79 @@ func applyStructuralOps(repo, s string, logger DualLogger) (string, bool, error)
     return stripped, true, nil
 }
 
-// stripFileDiffBlocks: 从 unified diff 文本中剔除给定路径相关的 diff 块（粗粒度，够用）
-// 规则：匹配 "diff --git a/<p> b/<...>" 起始，到下一个 "diff --git" 或文本结束。
+// stripFileDiffBlocks: 从 unified diff 文本中剔除给定路径相关的 diff 块（不使用前瞻，兼容 Go RE2）
+// 规则：匹配以 "diff --git a/<ap> b/<bp>" 开始的一块，直到下一个 "diff --git " 或文本结束。
+// 只要 ap 或 bp 命中 paths（或与 /dev/null 组合命中），就整块删掉。
 func stripFileDiffBlocks(s string, paths []string) string {
-    if len(paths) == 0 { return s }
-    // 构造一个宽松 pattern，逐个路径剔除对应块
-    out := s
-    for _, p := range paths {
-        if strings.TrimSpace(p) == "" { continue }
-        // 转义正则敏感字符
-        qp := regexp.QuoteMeta(p)
-        // 两种常见头： b/<p> 或 /dev/null；以及 a/<p>
-        re := regexp.MustCompile(`(?s)(?m)^diff --git a/` + qp + `\s+b/(?:` + qp + `|/dev/null).*?(?=^diff --git |\z)`)
-        out = re.ReplaceAllString(out, "")
-        // 也尝试仅 b/<p> 命中（避免 from/to 组合顺序不同）
-        re2 := regexp.MustCompile(`(?s)(?m)^diff --git a/(?:` + qp + `|/dev/null)\s+b/` + qp + `.*?(?=^diff --git |\z)`)
-        out = re2.ReplaceAllString(out, "")
-    }
-    // 清理多余空行
-    out = strings.TrimLeft(out, "\n")
-    return out
+	if len(paths) == 0 || strings.TrimSpace(s) == "" {
+		return s
+	}
+
+	// 建一个 set 便于 O(1) 判断
+	toStrip := make(map[string]struct{}, len(paths))
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		toStrip[p] = struct{}{}
+	}
+
+	lines := strings.Split(s, "\n")
+	var out []string
+	i := 0
+	for i < len(lines) {
+		ln := lines[i]
+
+		if strings.HasPrefix(ln, "diff --git ") {
+			// 解析 "diff --git a/<ap> b/<bp>"
+			// fields: ["diff","--git","a/<ap>","b/<bp>"]
+			ap, bp := "", ""
+			fields := strings.Fields(ln)
+			if len(fields) >= 4 {
+				if strings.HasPrefix(fields[2], "a/") {
+					ap = strings.TrimPrefix(fields[2], "a/")
+				} else if fields[2] == "/dev/null" {
+					ap = "/dev/null"
+				}
+				if strings.HasPrefix(fields[3], "b/") {
+					bp = strings.TrimPrefix(fields[3], "b/")
+				} else if fields[3] == "/dev/null" {
+					bp = "/dev/null"
+				}
+			}
+
+			// 是否命中要剔除的路径
+			_, apHit := toStrip[ap]
+			_, bpHit := toStrip[bp]
+			shouldStrip := apHit || bpHit ||
+				(ap == "/dev/null" && bpHit) ||
+				(bp == "/dev/null" && apHit)
+
+			// 找到这一块的结束位置（下一个 diff --git 或文本末尾）
+			j := i + 1
+			for j < len(lines) && !strings.HasPrefix(lines[j], "diff --git ") {
+				j++
+			}
+
+			if shouldStrip {
+				// 整块跳过
+				i = j
+				continue
+			}
+
+			// 不剔除，原样输出该块的第一行，继续逐行输出
+			out = append(out, ln)
+			i++
+			continue
+		}
+
+		// 非块头行，原样保留
+		out = append(out, ln)
+		i++
+	}
+
+	// 清理左侧多余空行（可选）
+	res := strings.TrimLeft(strings.Join(out, "\n"), "\n")
+	return res
 }
