@@ -12,6 +12,15 @@ import (
 )
 
 func applyOp(repo string, op *FileOp, logger *DualLogger) error {
+	// ⚠️ Deprecated: file.* 写类指令将逐步淘汰，推荐统一使用 git.diff（A/M/D/R/Mode）。
+	// 这里只做统一提醒，不改变现有行为，保证兼容老补丁。
+	if strings.HasPrefix(op.Cmd, "file.") &&
+		op.Cmd != "file.read" && op.Cmd != "file.list" && op.Cmd != "file.search" {
+		if logger != nil {
+			logger.Log("⚠️ 指令 %s 已弃用：建议改用 git.diff（A/M/D/R/Mode）。", op.Cmd)
+		}
+	}
+
 	switch op.Cmd {
 
 	case "file.write":
@@ -42,7 +51,11 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 		ignoreSpc := argBool(op.Args, "ignore_spaces", false)
 		debugNoHit := argBool(op.Args, "debug", false)
 
-		logf := func(format string, a ...any) { if logger != nil { logger.Log(format, a...) } }
+		logf := func(format string, a ...any) {
+			if logger != nil {
+				logger.Log(format, a...)
+			}
+		}
 
 		return fileops.FileReplace(
 			repo, op.Path, pattern, repl,
@@ -100,7 +113,7 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 			return errors.New("file.binary: base64 解码失败")
 		}
 		return fileops.FileBinary(repo, op.Path, string(bin), logger)
-		
+
 	// ========== gitops 系列 ==========
 	case "git.diff":
 		return gitops.Diff(repo, op.Body, logger)
