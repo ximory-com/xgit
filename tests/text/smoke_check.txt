@@ -1,0 +1,4 @@
+smoke line 1
+smoke line 2
+smoke line 3
+smoke line 4
