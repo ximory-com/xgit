@@ -3,5 +3,6 @@ package main
 import "fmt"
 
 func main() {
-	fmt.Println("tool ready")
+	fmt.Println("tool modified and ready")
+	fmt.Println("extra log line")
 }

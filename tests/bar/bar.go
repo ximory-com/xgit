@@ -1,6 +1,8 @@
 package bar
 
-// Bar returns a marker for modify tests
+// Bar now returns an updated marker
 func Bar() string {
-	return "bar"
+	return "bar-modified"
 }
+
+// Added comment for modify validation

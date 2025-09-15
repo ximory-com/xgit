@@ -1,4 +1,5 @@
 app: xgit
-env: dev
+env: prod
 features:
   - modify-tests
+  - config-updated

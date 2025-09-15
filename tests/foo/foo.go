@@ -1,6 +1,8 @@
 package foo
 
-// Foo returns a marker for modify tests
+// Foo now returns an updated marker
 func Foo() string {
-    return "foo"
+	return "foo-modified"
 }
+
+// Extra line added for modify test
