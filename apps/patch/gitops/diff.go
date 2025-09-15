@@ -65,6 +65,21 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 	// 1) 预处理并基本校验
 	diffText = sanitizeDiff(diffText)
 
+	// 1.1) 结构化预处理：先处理删除/改名（不匹配内容）
+	if updated, did, err := applyStructuralOps(repo, diffText, logger); err != nil {
+		return err
+	} else {
+		if did {
+			diffText = updated
+			// 结构化操作做完后，可能只剩新增/修改；若为空，直接走提交阶段（视你的外层逻辑而定）
+			if !looksLikeDiff(diffText) {
+				// 没有剩余可应用的 hunk，直接跳过 git apply；这里返回 nil 由上层继续提交/推送
+				logger.Log("ℹ️ 结构化操作完成，无需 git apply（仅 A/M 之外的变更已处理）")
+				return nil
+			}
+		}
+	}	
+
 	newLF, newCR := countLF(diffText), countCR(diffText)
 	newHash := sha8(diffText)
 	log("📝 处理后 diff: %d 字节, %d 行(\\n), %d 个\\r, hash=%s",
@@ -675,4 +690,81 @@ func fsPreflight(repo, diffText string, logger DualLogger) error {
     }
     log("❌ %s", b.String())
     return errors.New(b.String())
+}
+
+// applyStructuralOps: 先用 porcelain 命令处理删除/改名，不让 git apply 去匹配旧内容。
+// 返回：更新后的 diff（已剔除 D/R 的块）、是否做了结构化处理、错误
+func applyStructuralOps(repo, s string, logger DualLogger) (string, bool, error) {
+    adds, dels, mods, renames := summarizeDiffFiles(s)
+    _ = adds; _ = mods // 这里只处理 dels/renames
+
+    log := func(format string, a ...any) {
+        if logger != nil { logger.Log(format, a...) }
+    }
+
+    didSomething := false
+    var errs []string
+
+    // 先处理 rename：等价 git mv from to
+    for _, pr := range renames {
+        from, to := pr[0], pr[1]
+        // 若 from 不存在，交给 fsPreflight 已经会拦；这里直接尝试 mv
+        if _, err := runGit(repo, logger, "mv", "-f", from, to); err != nil {
+            errs = append(errs, fmt.Sprintf("rename %s→%s 失败: %v", from, to, err))
+        } else {
+            log("🔧 rename: %s → %s", from, to)
+            didSomething = true
+        }
+    }
+
+    // 再处理 delete：等价 git rm -f path
+    for _, p := range dels {
+        if _, err := runGit(repo, logger, "rm", "-f", "--", p); err != nil {
+            errs = append(errs, fmt.Sprintf("delete %s 失败: %v", p, err))
+        } else {
+            log("🗑️ delete: %s", p)
+            didSomething = true
+        }
+    }
+
+    if len(errs) > 0 {
+        return s, didSomething, errors.New("结构化操作失败：\n - " + strings.Join(errs, "\n - "))
+    }
+    if !didSomething {
+        return s, false, nil
+    }
+
+    // 从 diff 文本里把已处理的 D/R 块剔除，避免后续 git apply 再处理一次
+    pathsToStrip := make([]string, 0, len(dels)+len(renames)*2)
+    pathsToStrip = append(pathsToStrip, dels...)
+    for _, pr := range renames {
+        // rename 一般同一个块里出现 from/to，按 b/<to> 与 a/<from> 都剔
+        pathsToStrip = append(pathsToStrip, pr[0])
+        pathsToStrip = append(pathsToStrip, pr[1])
+    }
+    stripped := stripFileDiffBlocks(s, pathsToStrip)
+
+    return stripped, true, nil
+}
+
+// stripFileDiffBlocks: 从 unified diff 文本中剔除给定路径相关的 diff 块（粗粒度，够用）
+// 规则：匹配 "diff --git a/<p> b/<...>" 起始，到下一个 "diff --git" 或文本结束。
+func stripFileDiffBlocks(s string, paths []string) string {
+    if len(paths) == 0 { return s }
+    // 构造一个宽松 pattern，逐个路径剔除对应块
+    out := s
+    for _, p := range paths {
+        if strings.TrimSpace(p) == "" { continue }
+        // 转义正则敏感字符
+        qp := regexp.QuoteMeta(p)
+        // 两种常见头： b/<p> 或 /dev/null；以及 a/<p>
+        re := regexp.MustCompile(`(?s)(?m)^diff --git a/` + qp + `\s+b/(?:` + qp + `|/dev/null).*?(?=^diff --git |\z)`)
+        out = re.ReplaceAllString(out, "")
+        // 也尝试仅 b/<p> 命中（避免 from/to 组合顺序不同）
+        re2 := regexp.MustCompile(`(?s)(?m)^diff --git a/(?:` + qp + `|/dev/null)\s+b/` + qp + `.*?(?=^diff --git |\z)`)
+        out = re2.ReplaceAllString(out, "")
+    }
+    // 清理多余空行
+    out = strings.TrimLeft(out, "\n")
+    return out
 }
