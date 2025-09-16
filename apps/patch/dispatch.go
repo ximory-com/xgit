@@ -12,14 +12,6 @@ import (
 )
 
 func applyOp(repo string, op *FileOp, logger *DualLogger) error {
-	// ⚠️ Deprecated: file.* 写类指令将逐步淘汰，推荐统一使用 git.diff（A/M/D/R/Mode）。
-	// 这里只做统一提醒，不改变现有行为，保证兼容老补丁。
-	if strings.HasPrefix(op.Cmd, "file.") &&
-		op.Cmd != "file.read" && op.Cmd != "file.list" && op.Cmd != "file.search" {
-		if logger != nil {
-			logger.Log("⚠️ 指令 %s 已弃用：建议改用 git.diff（A/M/D/R/Mode）。", op.Cmd)
-		}
-	}
 
 	switch op.Cmd {
 
@@ -136,6 +128,15 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 		annotate := argBool(op.Args, "annotate", message != "")
 		force := argBool(op.Args, "force", false)
 		return gitops.Tag(repo, name, ref, message, annotate, force, logger)
+
+	case "line.insert_before":
+		return fileops.LineInsertBefore(repo, op.Path, op.Body, op.Args, logger)
+	case "line.insert_after":
+		return fileops.LineInsertAfter(repo, op.Path, op.Body, op.Args, logger)
+	case "line.replace_line":
+		return fileops.LineReplaceLine(repo, op.Path, op.Body, op.Args, logger)
+	case "line.delete_line":
+		return fileops.LineDeleteLine(repo, op.Path, op.Args, logger)
 
 	default:
 		return errors.New("未知指令: " + op.Cmd)
