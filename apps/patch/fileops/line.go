@@ -135,6 +135,120 @@ func LineDeleteLine(repo, rel string, args map[string]string, logger DualLogger)
 	return nil
 }
 
+// 依赖（同包已存在）：
+// - type DualLogger interface{ Log(format string, a ...any) }
+// - resolveLine(repo, rel string, args map[string]string) (int, error)
+// - readLines(abs string) ([]string, error)
+// - writeLines(abs string, lines []string) error
+// - splice(lines []string, start, del int, insert []string) []string
+// - ensureTrailingNL(lines []string) []string
+// - ensureNL(args map[string]string, def bool) bool
+// - var RunGitFunc func(repo string, logger DualLogger, args ...string) (string, error)
+
+// LineDeleteBlock: 删除一段连续行（包含边界行）
+// 两种定位方式（二选一）：
+//  1. start_lineno + end_lineno
+//  2. start_keys   + end_keys   （各自唯一命中一行；keys 匹配规则与 line.* 相同）
+//
+// 兼容参数：icase、ensure_nl、allow_noop
+func LineDeleteBlock(repo, rel string, args map[string]string, logger DualLogger) error {
+	// 判断采用哪种模式
+	useLineNo := strings.TrimSpace(args["start_lineno"]) != "" || strings.TrimSpace(args["end_lineno"]) != ""
+
+	var start, end int
+	var err error
+	if useLineNo {
+		// 行号模式
+		if start, err = resolveLineWith(repo, rel, "start_lineno", "start_keys", args); err != nil {
+			return fmt.Errorf("line.delete_block: start 定位失败：%w", err)
+		}
+		if end, err = resolveLineWith(repo, rel, "end_lineno", "end_keys", args); err != nil {
+			return fmt.Errorf("line.delete_block: end 定位失败：%w", err)
+		}
+	} else {
+		// 关键字模式
+		if strings.TrimSpace(args["start_keys"]) == "" {
+			return fmt.Errorf("line.delete_block: 缺少 start_keys 或 start_lineno")
+		}
+		if strings.TrimSpace(args["end_keys"]) == "" {
+			return fmt.Errorf("line.delete_block: 缺少 end_keys 或 end_lineno")
+		}
+		if start, err = resolveLineWith(repo, rel, "start_lineno", "start_keys", args); err != nil {
+			return fmt.Errorf("line.delete_block: start 定位失败：%w", err)
+		}
+		if end, err = resolveLineWith(repo, rel, "end_lineno", "end_keys", args); err != nil {
+			return fmt.Errorf("line.delete_block: end 定位失败：%w", err)
+		}
+	}
+
+	if end < start {
+		return fmt.Errorf("line.delete_block: 非法范围 start=%d > end=%d", start, end)
+	}
+
+	abs := filepath.Join(repo, rel)
+	lines, e := readLines(abs)
+	if e != nil {
+		return e
+	}
+
+	// 越界/空范围处理
+	if start < 1 || start > len(lines) || end < 1 {
+		if strings.EqualFold(strings.TrimSpace(args["allow_noop"]), "1") {
+			if logger != nil {
+				logger.Log("ℹ️ delete_block noop：%s [%d..%d] 越界/空范围", rel, start, end)
+			}
+			return nil
+		}
+		return fmt.Errorf("line.delete_block: 范围越界 start=%d end=%d（1..%d）", start, end, len(lines))
+	}
+	if end > len(lines) {
+		end = len(lines)
+	}
+	delN := end - start + 1
+	if delN <= 0 {
+		if strings.EqualFold(strings.TrimSpace(args["allow_noop"]), "1") {
+			if logger != nil {
+				logger.Log("ℹ️ delete_block noop：%s 空范围 [%d..%d]", rel, start, end)
+			}
+			return nil
+		}
+		return fmt.Errorf("line.delete_block: 空范围 [%d..%d]", start, end)
+	}
+
+	// 执行删除
+	lines = splice(lines, start-1, delN, nil)
+	if ensureNL(args, true) {
+		lines = ensureTrailingNL(lines)
+	}
+	if err := writeLines(abs, lines); err != nil {
+		return err
+	}
+
+	if logger != nil {
+		logger.Log("🗑️ delete_block %s:[%d..%d] (-%d)", rel, start, end, delN)
+	}
+	_, _ = runGit(repo, logger, "add", "--", rel)
+
+	return nil
+}
+
+// —— 辅助 ——
+// 将 *_lineno / *_keys 适配为 resolveLine 使用的 "lineno"/"keys"
+func resolveLineWith(repo, rel, linenoKey, keysKey string, args map[string]string) (int, error) {
+	sub := map[string]string{
+		"icase":      args["icase"],
+		"ensure_nl":  args["ensure_nl"],
+		"allow_noop": args["allow_noop"],
+	}
+	if v := strings.TrimSpace(args[linenoKey]); v != "" {
+		sub["lineno"] = v
+	}
+	if v := strings.TrimSpace(args[keysKey]); v != "" {
+		sub["keys"] = v
+	}
+	return resolveLine(repo, rel, sub)
+}
+
 // ---------- 定位/辅助 ----------
 
 func resolveLine(repo, rel string, args map[string]string) (int, error) {

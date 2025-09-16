@@ -137,7 +137,8 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 		return fileops.LineReplaceLine(repo, op.Path, op.Body, op.Args, logger)
 	case "line.delete_line":
 		return fileops.LineDeleteLine(repo, op.Path, op.Args, logger)
-
+	case "line.delete_block":
+		return fileops.LineDeleteBlock(repo, op.Path, op.Args, logger)
 	default:
 		return errors.New("未知指令: " + op.Cmd)
 	}
