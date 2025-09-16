@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -37,37 +36,31 @@ func ApplyOnce(logger *DualLogger, repo string, patch *Patch, patchFile string) 
 
 	// 2) 事务阶段
 	err = WithGitTxn(repo, logf, func() error {
-		// 先应用所有指令
+		// 1) 先应用所有指令
 		for i, op := range patch.Ops {
 			tag := fmt.Sprintf("%s #%d", op.Cmd, i+1)
-			if e := applyOp(repo, op, logger); e != nil { // 传指针，匹配原签名
+			if e := applyOp(repo, op, logger); e != nil {
 				logf("❌ %s 失败：%v", tag, e)
 				return e
 			}
 		}
 
-		// 预检：只对 M 类文件做预检写回，新建文件跳过（避免覆盖）
-		changed, _ := collectChangedFiles(repo) // 使用你已有的实现（helpher.go）
-		if len(changed) > 0 {
-			// 过滤“新增文件”，避免预检的兜底模板覆盖新文件真实内容
-			changedForPreflight := filterOutNewFiles(repo, changed)
-
-			if len(changedForPreflight) == 0 {
-				logf("ℹ️ 预检：有文件变更，但全是新增文件（跳过预检写回，仅后续提交）。")
-				return nil
-			}
-
-			logf("🧪 预检（真实仓库）：%d 个文件", len(changedForPreflight))
-			if err := preflightRun(repo, changedForPreflight, logger); err != nil { // 使用你已有的 preflight_run（preflight_exec.go）
-				logf("❌ 预检失败：%v", err)
-				return err
-			}
-			logf("✅ 预检通过")
-		} else {
-			logf("ℹ️ 无改动需要提交。")
+		// 2) 预检：不再过滤新增，直接对所有改动文件执行预检
+		changed, _ := collectChangedFiles(repo) // 仍使用你现有实现
+		if len(changed) == 0 {
+			// 不在这里打印“无改动需要提交”，交给事务外统一处理
+			return nil
 		}
+
+		logf("🧪 预检（真实仓库）：%d 个文件", len(changed))
+		if err := preflightRun(repo, changed, logger); err != nil {
+			logf("❌ 预检失败：%v", err)
+			return err
+		}
+		logf("✅ 预检通过")
 		return nil
 	})
+
 	if err != nil {
 		log("❌ git.diff 事务失败：%v", err)
 		return
@@ -102,17 +95,6 @@ func ApplyOnce(logger *DualLogger, repo string, patch *Patch, patchFile string) 
 		log("🚀 推送完成")
 	}
 	log("✅ 本次补丁完成")
-}
-
-// 过滤掉新增文件（仅保留已存在的文件用于预检）
-func filterOutNewFiles(repo string, files []string) []string {
-	var kept []string
-	for _, p := range files {
-		if _, err := os.Stat(filepath.Join(repo, p)); err == nil {
-			kept = append(kept, p)
-		}
-	}
-	return kept
 }
 
 // 统一仓库解析：Patch.Repo > 头部 repo: > .repos default
