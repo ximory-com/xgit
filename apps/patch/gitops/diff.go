@@ -126,23 +126,27 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 		return err
 	}
 
-	// 4) 选择策略并尝试应用（统一 --recount）
+	// 4) 选择策略并尝试应用（统一宽松选项）
 	strategies := buildStrategiesFromDiff(diffText)
 	var lastOut string
 	var lastErr error
+	var lastPatchErrLine int
+
 	for i, args := range strategies {
 		full := append([]string{"apply"}, append(args, patchPath)...)
 		out, err := runGit(repo, logger, full...)
 		if err != nil {
+			// 循环里只记“简要”，别刷屏
+			log("⚠️ git %v 失败（策略 #%d）", args, i+1)
+
+			// 记住最后一次的完整错误与输出
 			lastOut, lastErr = out, err
-			log("⚠️ git %v 失败（策略 #%d）：%v", args, i+1, err)
-			if line := extractPatchErrorLine(out); line > 0 {
-				if ctx := readPatchContext(patchPath, line, 20); ctx != "" {
-					log("🧭 出错行上下文（±20）：\n%s", ctx)
-				}
+			if ln := extractPatchErrorLine(out); ln > 0 {
+				lastPatchErrLine = ln
 			}
 			continue
 		}
+
 		// 成功后检查是否生成 .rej
 		if rejs, _ := findRejects(repo); len(rejs) > 0 {
 			var b strings.Builder
@@ -154,7 +158,7 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 			return fmt.Errorf("git.diff: 存在未能应用的 hunk（生成 .rej）：\n%s", b.String())
 		}
 
-		// ✨ 成功：解析文件清单并逐条输出（对齐：新建/删除/修改/改名）
+		// ✨ 成功日志（省略，无变化）
 		adds, dels, mods, renames := summarizeDiffFiles(diffText)
 		printed := false
 		if len(adds) > 0 {
@@ -185,11 +189,10 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 			log("✅ git.diff 完成（策略 #%d）", i+1)
 		}
 
-		// 4.5) 新建文件强校验：补丁“+行数”应等于工作区实际行数
+		// 新建文件强校验（如你已有的逻辑）
 		for _, p := range adds {
 			expect := countPlusLinesForFile(diffText, p)
 			if expect <= 0 {
-				// 未能统计出 “+” 行数，给出提示但不中断（视为免核对）
 				log("ℹ️ 新建 %s：跳过行数校验（未找到 '+' 行）", p)
 				continue
 			}
@@ -201,46 +204,22 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 		return nil
 	}
 
-	// 5) 全部失败
-	// 失败时打印首个 hunk 的锚点上下文（±3 行），便于用户提供精准锚点（2–5 行原文）
-	if logger != nil {
-		lines := strings.Split(diffText, "\n")
-		first := -1
-		for i, l := range lines {
-			if strings.HasPrefix(strings.TrimSpace(l), "@@") {
-				first = i
-				break
-			}
-		}
-		if first >= 0 {
-			start := first - 3
-			if start < 0 {
-				start = 0
-			}
-			end := first + 4 // 包含 @@ 行
-			if end > len(lines) {
-				end = len(lines)
-			}
-			var b strings.Builder
-			for i := start; i < end; i++ {
-				fmt.Fprintf(&b, "    %s\n", lines[i])
-			}
-			log("❌ git.apply 失败，相关 hunk 附近上下文：\n%s", b.String())
-			log("💡 建议：请提供目标文件中的精准锚点（连续 2–5 行原文），以便生成更稳的补丁。")
-		}
-	}
-
-	if rejs, _ := findRejects(repo); len(rejs) > 0 {
-		var b strings.Builder
-		for _, r := range rejs {
-			b.WriteString(" - ")
-			b.WriteString(r)
-			b.WriteString("\n")
-		}
-		return fmt.Errorf("%v\n%s\ngit.diff: 同时检测到 .rej 文件：\n%s", lastErr, lastOut, b.String())
-	}
+	// 5) 全部失败：只在这里统一打印一次“详细错误”
 	if lastErr != nil {
-		return fmt.Errorf("%v\n%s", lastErr, lastOut)
+		if lastPatchErrLine > 0 {
+			if ctx := readPatchContext(patchPath, lastPatchErrLine, 20); ctx != "" {
+				log("🧭 出错行上下文（±20）：\n%s", ctx)
+			}
+		}
+		// 同时附带 .rej 提示（如有）
+		if rejs, _ := findRejects(repo); len(rejs) > 0 {
+			var b strings.Builder
+			for _, r := range rejs {
+				fmt.Fprintf(&b, " - %s\n", r)
+			}
+			return fmt.Errorf("git apply 全部策略失败：%v\n%s\ngit.diff: 同时检测到 .rej 文件：\n%s", lastErr, lastOut, b.String())
+		}
+		return fmt.Errorf("git apply 全部策略失败：%v\n%s", lastErr, lastOut)
 	}
 	return errors.New("git.diff: git apply 失败（未知原因）")
 }
@@ -270,31 +249,29 @@ func analyzeDiffKinds(s string) (hasAddOrDelete bool, hasRename bool) {
 func buildStrategiesFromDiff(s string) [][]string {
 	hasAddOrDelete, hasRename := analyzeDiffKinds(s)
 
-	// 基础宽松参数（注意：git apply 没有 -w，必须用长选项）
-	base := []string{
-		"--ignore-whitespace",
-		"--ignore-space-change",
-		"--ignore-space-at-eol",
+	// 通用宽松选项（提升锚点容错率）
+	loose := []string{
 		"--recount",
+		"--ignore-space-change",
+		"--ignore-whitespace",
 		"--whitespace=nowarn",
+		"--unidiff-zero",
 	}
 
-	// 重命名/新增/删除：跳过 3-way，但保留 --index 与最后兜底
+	// 重命名/新增/删除：跳过 3-way（避免内容匹配）
 	if hasAddOrDelete || hasRename {
 		return [][]string{
-			append([]string{}, base...),                           // 直贴（宽松）
-			append([]string{"--index"}, base...),                  // 需要更新 index（存在时生效）
-			append(append([]string{}, base...), "--unidiff-zero"), // 兜底（无上下文）
+			append([]string{"--index"}, loose...), // 若索引已存在可协助路径解析
+			loose,                                 // 直贴
 		}
 	}
 
-	// 纯修改：优先 3-way → 普通 apply → 兜底
+	// 纯修改：优先 3way 提高成功率；再退化到普通 apply
 	return [][]string{
-		append([]string{"--index", "--3way"}, base...),        // 3-way + index（宽松）
-		append([]string{"--3way"}, base...),                   // 仅 3-way（宽松）
-		append([]string{"--index"}, base...),                  // 非 3-way + index（宽松）
-		append([]string{}, base...),                           // 非 3-way（宽松）
-		append(append([]string{}, base...), "--unidiff-zero"), // 最终兜底（无上下文）
+		append([]string{"--index", "--3way"}, loose...),
+		append([]string{"--3way"}, loose...),
+		append([]string{"--index"}, loose...),
+		loose,
 	}
 }
 
