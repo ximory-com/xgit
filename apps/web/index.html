@@ -12,6 +12,43 @@
     .hero img,.hero .hero-logo{width:min(200px,40vw)}
     .logo,.logo-grid img,header img{max-width:120px}
   </style>
+  <script>
+    (function(){
+      var SITE='https://xgit.ximory.com/';
+      var KEY='xgit.lang';
+      function getLang(){ var v=localStorage.getItem(KEY); return v==='en'?'en':'zh'; }
+      function applyLang(l){
+        if (window.applyI18n) { try{ window.applyI18n(); }catch(e){}; return; }
+        document.querySelectorAll('[data-zh],[data-en]').forEach(function(el){
+          var zh=el.getAttribute('data-zh'), en=el.getAttribute('data-en');
+          if(l==='en'&&en!=null) el.textContent=en;
+          if(l==='zh'&&zh!=null) el.textContent=zh;
+        });
+        document.querySelectorAll('.i18n-only-zh').forEach(function(el){ el.style.display=(l==='zh'?'':'none'); });
+        document.querySelectorAll('.i18n-only-en').forEach(function(el){ el.style.display=(l==='en'?'':'none'); });
+      }
+      function setLang(l){ l=(l==='en'?'en':'zh'); localStorage.setItem(KEY,l); applyLang(l); }
+      // 委托：任意 data-lang / .nav-site / [data-nav="site"] / #btnBack
+      document.addEventListener('click', function(e){
+        var el = e.target.closest && e.target.closest('[data-lang], .nav-site, [data-nav="site"], #btnBack');
+        if(!el) return;
+        if(el.matches('.nav-site, [data-nav="site"], #btnBack')){ e.preventDefault(); location.href=SITE; return; }
+        if(el.hasAttribute('data-lang')){
+          var v=(el.getAttribute('data-lang')||'').toLowerCase();
+          if(v==='zh'||v==='en') setLang(v);
+        }
+      });
+      // DOM 就绪：给“中文/EN”补 data-lang，并应用偏好
+      document.addEventListener('DOMContentLoaded', function(){
+        Array.prototype.forEach.call(document.querySelectorAll('button,a'), function(el){
+          var t=(el.textContent||'').trim().toLowerCase();
+          if(t==='中文') el.setAttribute('data-lang','zh');
+          if(t==='en')   el.setAttribute('data-lang','en');
+        });
+        applyLang(getLang());
+      });
+    })();
+  </script>
 </head>
 <body>
 
