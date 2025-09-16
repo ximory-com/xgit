@@ -65,38 +65,26 @@ func WithGitTxn(repo string, logf func(string, ...any), fn func() error) error {
 	return nil
 }
 
-// collectChangedFiles: 收集已改动文件（新增/修改/删除/重命名后的新路径）
 func collectChangedFiles(repo string) ([]string, error) {
 	out, err := runCmdOut("git", "-C", repo, "status", "--porcelain", "-z")
 	if err != nil {
 		return nil, err
 	}
-
-	var changed []string
 	parts := strings.Split(out, "\x00")
+	var changed []string
 	for _, p := range parts {
-		if p == "" {
-			continue
-		}
-		// 如果是 rename，格式为 "R  old -> new"，只取 new
-		if strings.Contains(p, "->") {
-			fields := strings.Split(p, "->")
-			last := strings.TrimSpace(fields[len(fields)-1])
-			p = last
-		}
-
-		// 最终清理
 		p = strings.TrimSpace(p)
 		if p == "" {
 			continue
 		}
-
-		// 跳过目录（保险）
+		if strings.Contains(p, "->") { // rename: "R  old -> new"
+			seg := strings.Split(p, "->")
+			p = strings.TrimSpace(seg[len(seg)-1])
+		}
 		full := filepath.Join(repo, p)
 		if fi, err := os.Stat(full); err == nil && fi.IsDir() {
 			continue
 		}
-
 		changed = append(changed, p)
 	}
 	return changed, nil

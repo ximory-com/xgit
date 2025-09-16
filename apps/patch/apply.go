@@ -85,7 +85,10 @@ func ApplyOnce(logger *DualLogger, repo string, patch *Patch, patchFile string) 
 	log("ℹ️ 提交说明：%s", commit)
 	log("ℹ️ 提交作者：%s", author)
 
-	_ = runCmd("git", "-C", repo, "commit", "--author", author, "-m", commit)
+	if err := runCmd("git", "-C", repo, "commit", "--author", author, "-m", commit); err != nil {
+		log("❌ 提交失败：%v", err)
+		return
+	}
 	log("✅ 已提交：%s", commit)
 
 	log("🚀 正在推送（origin HEAD）…")
