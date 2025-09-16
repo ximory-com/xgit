@@ -78,7 +78,7 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 				return nil
 			}
 		}
-	}	
+	}
 
 	newLF, newCR := countLF(diffText), countCR(diffText)
 	newHash := sha8(diffText)
@@ -202,6 +202,34 @@ func Diff(repo string, diffText string, logger DualLogger) error {
 	}
 
 	// 5) 全部失败
+	// 失败时打印首个 hunk 的锚点上下文（±3 行），便于用户提供精准锚点（2–5 行原文）
+	if logger != nil {
+		lines := strings.Split(diffText, "\n")
+		first := -1
+		for i, l := range lines {
+			if strings.HasPrefix(strings.TrimSpace(l), "@@") {
+				first = i
+				break
+			}
+		}
+		if first >= 0 {
+			start := first - 3
+			if start < 0 {
+				start = 0
+			}
+			end := first + 4 // 包含 @@ 行
+			if end > len(lines) {
+				end = len(lines)
+			}
+			var b strings.Builder
+			for i := start; i < end; i++ {
+				fmt.Fprintf(&b, "    %s\n", lines[i])
+			}
+			log("❌ git.apply 失败，相关 hunk 附近上下文：\n%s", b.String())
+			log("💡 建议：请提供目标文件中的精准锚点（连续 2–5 行原文），以便生成更稳的补丁。")
+		}
+	}
+
 	if rejs, _ := findRejects(repo); len(rejs) > 0 {
 		var b strings.Builder
 		for _, r := range rejs {
@@ -238,22 +266,35 @@ func analyzeDiffKinds(s string) (hasAddOrDelete bool, hasRename bool) {
 	return
 }
 
-// 根据 diff 类型选择策略序列（统一加 --recount）
+// 根据 diff 类型选择策略序列（宽松空白 & 行号重算；末尾兜底 unidiff-zero）
 func buildStrategiesFromDiff(s string) [][]string {
 	hasAddOrDelete, hasRename := analyzeDiffKinds(s)
-	// 重命名/新增/删除：跳过 3-way
+
+	// 基础宽松参数（注意：git apply 没有 -w，必须用长选项）
+	base := []string{
+		"--ignore-whitespace",
+		"--ignore-space-change",
+		"--ignore-space-at-eol",
+		"--recount",
+		"--whitespace=nowarn",
+	}
+
+	// 重命名/新增/删除：跳过 3-way，但保留 --index 与最后兜底
 	if hasAddOrDelete || hasRename {
 		return [][]string{
-			{"--recount", "--whitespace=nowarn"},            // 直贴
-			{"--index", "--recount", "--whitespace=nowarn"}, // 如需更新 index（存在时生效）
+			append([]string{}, base...),                           // 直贴（宽松）
+			append([]string{"--index"}, base...),                  // 需要更新 index（存在时生效）
+			append(append([]string{}, base...), "--unidiff-zero"), // 兜底（无上下文）
 		}
 	}
-	// 纯修改：优先 3way 提高成功率
+
+	// 纯修改：优先 3-way → 普通 apply → 兜底
 	return [][]string{
-		{"--index", "--3way", "--recount", "--whitespace=nowarn"},
-		{"--3way", "--recount", "--whitespace=nowarn"},
-		{"--index", "--recount", "--whitespace=nowarn"},
-		{"--recount", "--whitespace=nowarn"},
+		append([]string{"--index", "--3way"}, base...),        // 3-way + index（宽松）
+		append([]string{"--3way"}, base...),                   // 仅 3-way（宽松）
+		append([]string{"--index"}, base...),                  // 非 3-way + index（宽松）
+		append([]string{}, base...),                           // 非 3-way（宽松）
+		append(append([]string{}, base...), "--unidiff-zero"), // 最终兜底（无上下文）
 	}
 }
 
@@ -620,131 +661,136 @@ func ensureWorktreeLines(repo, repoRelPath string, expect int) error {
 
 // fsPreflight：对补丁涉及的目标做本地文件系统存在性校验
 // 规则：
-//  A(新增)  -> 目标文件若存在 => FAIL（不执行）
-//  M(修改)  -> 目标文件若不存在 => FAIL（不执行）
-//  D(删除)  -> 目标文件若不存在 => FAIL（不执行）
-//  R(改名)  -> from 不存在 => FAIL；to 若已存在 => FAIL（避免覆盖）
+//
+//	A(新增)  -> 目标文件若存在 => FAIL（不执行）
+//	M(修改)  -> 目标文件若不存在 => FAIL（不执行）
+//	D(删除)  -> 目标文件若不存在 => FAIL（不执行）
+//	R(改名)  -> from 不存在 => FAIL；to 若已存在 => FAIL（避免覆盖）
 //
 // 注意：这里基于 summarizeDiffFiles(diffText) 的结果；
-//       若你的 diff 里有同一文件同补丁先 A 再 M 之类复杂操作，建议改为按块解析。
-//       常规新建/修改/删除/改名场景，这个足够稳。
+//
+//	若你的 diff 里有同一文件同补丁先 A 再 M 之类复杂操作，建议改为按块解析。
+//	常规新建/修改/删除/改名场景，这个足够稳。
 func fsPreflight(repo, diffText string, logger DualLogger) error {
-    log := func(format string, a ...any) {
-        if logger != nil {
-            logger.Log(format, a...)
-        }
-    }
+	log := func(format string, a ...any) {
+		if logger != nil {
+			logger.Log(format, a...)
+		}
+	}
 
-    adds, dels, mods, renames := summarizeDiffFiles(diffText)
+	adds, dels, mods, renames := summarizeDiffFiles(diffText)
 
-    type viol struct{ kind, path, more string }
-    var conflicts []viol
+	type viol struct{ kind, path, more string }
+	var conflicts []viol
 
-    exists := func(p string) bool {
-        st, err := os.Stat(filepath.Join(repo, p))
-        return err == nil && !st.IsDir()
-    }
+	exists := func(p string) bool {
+		st, err := os.Stat(filepath.Join(repo, p))
+		return err == nil && !st.IsDir()
+	}
 
-    // 新增：目标不得已存在
-    for _, p := range adds {
-        if exists(p) {
-            conflicts = append(conflicts, viol{"A", p, "目标已存在"})
-        }
-    }
+	// 新增：目标不得已存在
+	for _, p := range adds {
+		if exists(p) {
+			conflicts = append(conflicts, viol{"A", p, "目标已存在"})
+		}
+	}
 
-    // 修改：目标必须已存在
-    for _, p := range mods {
-        if !exists(p) {
-            conflicts = append(conflicts, viol{"M", p, "目标不存在"})
-        }
-    }
+	// 修改：目标必须已存在
+	for _, p := range mods {
+		if !exists(p) {
+			conflicts = append(conflicts, viol{"M", p, "目标不存在"})
+		}
+	}
 
-    // 删除：目标必须已存在
-    for _, p := range dels {
-        if !exists(p) {
-            conflicts = append(conflicts, viol{"D", p, "目标不存在"})
-        }
-    }
+	// 删除：目标必须已存在
+	for _, p := range dels {
+		if !exists(p) {
+			conflicts = append(conflicts, viol{"D", p, "目标不存在"})
+		}
+	}
 
-    // 改名：from 必须存在；to 不得存在（避免覆盖）
-    for _, pr := range renames {
-        from, to := pr[0], pr[1]
-        if !exists(from) {
-            conflicts = append(conflicts, viol{"R", from, "rename from 不存在"})
-        }
-        if exists(to) {
-            conflicts = append(conflicts, viol{"R", to, "rename to 已存在"})
-        }
-    }
+	// 改名：from 必须存在；to 不得存在（避免覆盖）
+	for _, pr := range renames {
+		from, to := pr[0], pr[1]
+		if !exists(from) {
+			conflicts = append(conflicts, viol{"R", from, "rename from 不存在"})
+		}
+		if exists(to) {
+			conflicts = append(conflicts, viol{"R", to, "rename to 已存在"})
+		}
+	}
 
-    if len(conflicts) == 0 {
-        log("🔒 预检：文件存在性通过（A/M/D/R）")
-        return nil
-    }
+	if len(conflicts) == 0 {
+		log("🔒 预检：文件存在性通过（A/M/D/R）")
+		return nil
+	}
 
-    // 打印冲突清单并中止
-    var b strings.Builder
-    b.WriteString("git.diff: 文件存在性预检失败：\n")
-    for _, c := range conflicts {
-        fmt.Fprintf(&b, " - [%s] %s：%s\n", c.kind, c.path, c.more)
-    }
-    log("❌ %s", b.String())
-    return errors.New(b.String())
+	// 打印冲突清单并中止
+	var b strings.Builder
+	b.WriteString("git.diff: 文件存在性预检失败：\n")
+	for _, c := range conflicts {
+		fmt.Fprintf(&b, " - [%s] %s：%s\n", c.kind, c.path, c.more)
+	}
+	log("❌ %s", b.String())
+	return errors.New(b.String())
 }
 
 // applyStructuralOps: 先用 porcelain 命令处理删除/改名，不让 git apply 去匹配旧内容。
 // 返回：更新后的 diff（已剔除 D/R 的块）、是否做了结构化处理、错误
 func applyStructuralOps(repo, s string, logger DualLogger) (string, bool, error) {
-    adds, dels, mods, renames := summarizeDiffFiles(s)
-    _ = adds; _ = mods // 这里只处理 dels/renames
+	adds, dels, mods, renames := summarizeDiffFiles(s)
+	_ = adds
+	_ = mods // 这里只处理 dels/renames
 
-    log := func(format string, a ...any) {
-        if logger != nil { logger.Log(format, a...) }
-    }
+	log := func(format string, a ...any) {
+		if logger != nil {
+			logger.Log(format, a...)
+		}
+	}
 
-    didSomething := false
-    var errs []string
+	didSomething := false
+	var errs []string
 
-    // 先处理 rename：等价 git mv from to
-    for _, pr := range renames {
-        from, to := pr[0], pr[1]
-        // 若 from 不存在，交给 fsPreflight 已经会拦；这里直接尝试 mv
-        if _, err := runGit(repo, logger, "mv", "-f", from, to); err != nil {
-            errs = append(errs, fmt.Sprintf("rename %s→%s 失败: %v", from, to, err))
-        } else {
-            log("🔧 rename: %s → %s", from, to)
-            didSomething = true
-        }
-    }
+	// 先处理 rename：等价 git mv from to
+	for _, pr := range renames {
+		from, to := pr[0], pr[1]
+		// 若 from 不存在，交给 fsPreflight 已经会拦；这里直接尝试 mv
+		if _, err := runGit(repo, logger, "mv", "-f", from, to); err != nil {
+			errs = append(errs, fmt.Sprintf("rename %s→%s 失败: %v", from, to, err))
+		} else {
+			log("🔧 rename: %s → %s", from, to)
+			didSomething = true
+		}
+	}
 
-    // 再处理 delete：等价 git rm -f path
-    for _, p := range dels {
-        if _, err := runGit(repo, logger, "rm", "-f", "--", p); err != nil {
-            errs = append(errs, fmt.Sprintf("delete %s 失败: %v", p, err))
-        } else {
-            log("🗑️ delete: %s", p)
-            didSomething = true
-        }
-    }
+	// 再处理 delete：等价 git rm -f path
+	for _, p := range dels {
+		if _, err := runGit(repo, logger, "rm", "-f", "--", p); err != nil {
+			errs = append(errs, fmt.Sprintf("delete %s 失败: %v", p, err))
+		} else {
+			log("🗑️ delete: %s", p)
+			didSomething = true
+		}
+	}
 
-    if len(errs) > 0 {
-        return s, didSomething, errors.New("结构化操作失败：\n - " + strings.Join(errs, "\n - "))
-    }
-    if !didSomething {
-        return s, false, nil
-    }
+	if len(errs) > 0 {
+		return s, didSomething, errors.New("结构化操作失败：\n - " + strings.Join(errs, "\n - "))
+	}
+	if !didSomething {
+		return s, false, nil
+	}
 
-    // 从 diff 文本里把已处理的 D/R 块剔除，避免后续 git apply 再处理一次
-    pathsToStrip := make([]string, 0, len(dels)+len(renames)*2)
-    pathsToStrip = append(pathsToStrip, dels...)
-    for _, pr := range renames {
-        // rename 一般同一个块里出现 from/to，按 b/<to> 与 a/<from> 都剔
-        pathsToStrip = append(pathsToStrip, pr[0])
-        pathsToStrip = append(pathsToStrip, pr[1])
-    }
-    stripped := stripFileDiffBlocks(s, pathsToStrip)
+	// 从 diff 文本里把已处理的 D/R 块剔除，避免后续 git apply 再处理一次
+	pathsToStrip := make([]string, 0, len(dels)+len(renames)*2)
+	pathsToStrip = append(pathsToStrip, dels...)
+	for _, pr := range renames {
+		// rename 一般同一个块里出现 from/to，按 b/<to> 与 a/<from> 都剔
+		pathsToStrip = append(pathsToStrip, pr[0])
+		pathsToStrip = append(pathsToStrip, pr[1])
+	}
+	stripped := stripFileDiffBlocks(s, pathsToStrip)
 
-    return stripped, true, nil
+	return stripped, true, nil
 }
 
 // stripFileDiffBlocks: 从 unified diff 文本中剔除给定路径相关的 diff 块（不使用前瞻，兼容 Go RE2）
