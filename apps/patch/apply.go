@@ -63,14 +63,13 @@ func ApplyOnce(logger *DualLogger, repo string, patch *Patch, patchFile string) 
 
 	log("ℹ️ 提交说明：%s", commit)
 	log("ℹ️ 提交作者：%s", author)
-
-	// 统一纳入索引（避免未跟踪目录导致空提交）
+	// === 统一纳入索引 ===
 	if _, err := runGit(repo, logger, "add", "-A", "--"); err != nil {
 		log("❌ stage 失败：%v", err)
 		return
 	}
 
-	// 只看已暂存改动决定是否提交
+	// === 只看已暂存改动，决定是否提交 ===
 	out, _ := runGit(repo, logger, "diff", "--cached", "--name-only", "-z")
 	hasStaged := false
 	for _, p := range strings.Split(out, "\x00") {
@@ -84,29 +83,20 @@ func ApplyOnce(logger *DualLogger, repo string, patch *Patch, patchFile string) 
 		return
 	}
 
-	if err := runCmd("git", "-C", repo, "commit", "--author", author, "-m", commit); err != nil {
-		log("❌ 提交失败：%v", err)
-		return
-	}
-	log("✅ 已提交：%s", commit)
-	log("🚀 正在推送（origin HEAD）…")
-	if _, err := runGit(repo, logger, "push", "origin", "HEAD"); err != nil {
-		log("❌ 推送失败：%v", err)
-		return
-	}
-	log("🚀 推送完成")
+	// === 提交 ===
 	if err := runCmd("git", "-C", repo, "commit", "--author", author, "-m", commit); err != nil {
 		log("❌ 提交失败：%v", err)
 		return
 	}
 	log("✅ 已提交：%s", commit)
 
+	// === 推送 ===
 	log("🚀 正在推送（origin HEAD）…")
-	if _, err := runCmdOut("git", "-C", repo, "push", "origin", "HEAD"); err != nil {
+	if _, err := runGit(repo, logger, "push", "origin", "HEAD"); err != nil {
 		log("❌ 推送失败：%v", err)
-	} else {
-		log("🚀 推送完成")
+		return
 	}
+	log("🚀 推送完成")
 	log("✅ 本次补丁完成")
 }
 

@@ -12,15 +12,18 @@ func runGit(repo string, logger *DualLogger, args ...string) (string, error) {
 	argv := append([]string{"-C", repo}, args...)
 	out, err := runCmdOut("git", argv...)
 
-	// 可选：对部分命令做更友好的日志
 	if logger != nil {
 		joined := strings.Join(args, " ")
-		switch {
-		case strings.HasPrefix(joined, "apply "),
-			strings.HasPrefix(joined, "push "),
-			strings.HasPrefix(joined, "commit "),
-			strings.HasPrefix(joined, "diff "),
-			strings.HasPrefix(joined, "status "):
+
+		// 只对关键命令打印 stdout，避免噪音
+		printable :=
+			strings.HasPrefix(joined, "apply ") ||
+				strings.HasPrefix(joined, "push ") ||
+				strings.HasPrefix(joined, "commit ") ||
+				strings.HasPrefix(joined, "status ")
+
+		// 像 "diff --cached --name-only -z" 这种就别打印了
+		if printable {
 			if s := strings.TrimSpace(out); s != "" {
 				logger.Log("%s", s)
 			}
