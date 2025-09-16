@@ -24,40 +24,6 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 	case "file.prepend":
 		return fileops.FilePrepend(repo, op.Path, []byte(op.Body), logger)
 
-	case "file.replace":
-		pattern := argStr(op.Args, "pattern", "")
-		if pattern == "" {
-			return errors.New("file.replace: missing @pattern (body param)")
-		}
-		repl := op.Body
-
-		isRegex := argBool(op.Args, "regex", false)
-		icase := argBool(op.Args, "ci", false)
-		lineFrom := argInt(op.Args, "start_line", 0)
-		lineTo := argInt(op.Args, "end_line", 0)
-		count := argInt(op.Args, "count", 0)
-		ensureNL := argBool(op.Args, "ensure_eof_nl", false)
-		multiline := argBool(op.Args, "multiline", false)
-
-		mode := strings.TrimSpace(strings.ToLower(argStr(op.Args, "mode", "")))
-		ignoreSpc := argBool(op.Args, "ignore_spaces", false)
-		debugNoHit := argBool(op.Args, "debug", false)
-
-		logf := func(format string, a ...any) {
-			if logger != nil {
-				logger.Log(format, a...)
-			}
-		}
-
-		return fileops.FileReplace(
-			repo, op.Path, pattern, repl,
-			isRegex, icase,
-			lineFrom, lineTo,
-			count, ensureNL, multiline,
-			mode, ignoreSpc, debugNoHit,
-			logf,
-		)
-
 	case "file.delete":
 		return fileops.FileDelete(repo, op.Path, logger)
 
