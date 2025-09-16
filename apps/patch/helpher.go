@@ -2,11 +2,32 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 )
+
+// 在 main 包里提供一个 runGit 薄封装，避免依赖 gitops 包的未导出函数。
+// 统一用 runCmdOut 调 git，并把 repo 变成 -C <repo>
+func runGit(repo string, logger *DualLogger, args ...string) (string, error) {
+	argv := append([]string{"-C", repo}, args...)
+	out, err := runCmdOut("git", argv...)
+
+	// 可选：对部分命令做更友好的日志
+	if logger != nil {
+		joined := strings.Join(args, " ")
+		switch {
+		case strings.HasPrefix(joined, "apply "),
+			strings.HasPrefix(joined, "push "),
+			strings.HasPrefix(joined, "commit "),
+			strings.HasPrefix(joined, "diff "),
+			strings.HasPrefix(joined, "status "):
+			if s := strings.TrimSpace(out); s != "" {
+				logger.Log("%s", s)
+			}
+		}
+	}
+	return out, err
+}
 
 func runCmd(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
@@ -63,29 +84,4 @@ func WithGitTxn(repo string, logf func(string, ...any), fn func() error) error {
 		return err
 	}
 	return nil
-}
-
-func collectChangedFiles(repo string) ([]string, error) {
-	out, err := runCmdOut("git", "-C", repo, "status", "--porcelain", "-z")
-	if err != nil {
-		return nil, err
-	}
-	parts := strings.Split(out, "\x00")
-	var changed []string
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		if strings.Contains(p, "->") { // rename: "R  old -> new"
-			seg := strings.Split(p, "->")
-			p = strings.TrimSpace(seg[len(seg)-1])
-		}
-		full := filepath.Join(repo, p)
-		if fi, err := os.Stat(full); err == nil && fi.IsDir() {
-			continue
-		}
-		changed = append(changed, p)
-	}
-	return changed, nil
 }

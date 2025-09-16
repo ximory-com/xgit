@@ -101,26 +101,11 @@ func main() {
 		} else {
 			fmt.Println("未运行")
 		}
+	case "clearhash":
+		clearHash(baseDir)
 	default:
 		usage()
 	}
-}
-
-// 为保持行为一致，保留你原来的仓库解析帮助等（若 main.go 中确有用到）。
-func resolveRepo(baseDir, patchFile string) (string, error) {
-	repos, def := LoadRepos(baseDir)
-	target := HeaderRepoName(patchFile)
-	if strings.TrimSpace(target) == "" {
-		target = def
-	}
-	if target == "" {
-		return "", fmt.Errorf("无法解析目标仓库（头部 repo:/.repos default 皆为空）")
-	}
-	real := repos[target]
-	if real == "" {
-		return "", fmt.Errorf("repo 映射缺失：%s", target)
-	}
-	return real, nil
 }
 
 func saveLastHash(baseDir, hash string) {
@@ -133,4 +118,15 @@ func loadLastHash(baseDir string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(data))
+}
+
+func clearHash(baseDir string) {
+	hashFile := filepath.Join(baseDir, ".lastpatch")
+	if err := os.Remove(hashFile); err == nil {
+		fmt.Printf("🧹 已清除补丁 hash 记录：%s", hashFile)
+	} else if os.IsNotExist(err) {
+		fmt.Printf("ℹ️ 未找到补丁 hash 文件，无需清理")
+	} else {
+		fmt.Printf("❌ 清理补丁 hash 失败：%v", err)
+	}
 }

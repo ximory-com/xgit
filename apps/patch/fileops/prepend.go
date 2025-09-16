@@ -4,6 +4,7 @@ XGIT FileOps: file.prepend
 */
 // XGIT:BEGIN GO:PACKAGE
 package fileops
+
 // XGIT:END GO:PACKAGE
 
 // XGIT:BEGIN GO:IMPORTS
@@ -11,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 )
+
 // XGIT:END GO:IMPORTS
 
 // XGIT:BEGIN GO:FUNC_FILE_PREPEND
@@ -25,10 +27,21 @@ func FilePrepend(repo, rel string, data []byte, logger DualLogger) error {
 	}
 	newContent = append(newContent, old...)
 	if err := os.WriteFile(abs, newContent, 0o644); err != nil {
-		if logger != nil { logger.Log("❌ file.prepend 写入失败：%s (%v)", rel, err) }
+		if logger != nil {
+			logger.Log("❌ file.prepend 写入失败：%s (%v)", rel, err)
+		}
 		return err
 	}
-	if logger != nil { logger.Log("✅ file.prepend 完成：%s", rel) }
+	if logger != nil {
+		logger.Log("✅ file.prepend 完成：%s", rel)
+	}
+	if err := preflightOne(repo, rel, logger); err != nil {
+		if logger != nil {
+			logger.Log("❌ 预检失败：%s (%v)", rel, err)
+		}
+		return err
+	}
 	return nil
 }
+
 // XGIT:END GO:FUNC_FILE_PREPEND

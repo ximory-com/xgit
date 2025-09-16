@@ -40,7 +40,13 @@ func FileWrite(repo, rel string, data []byte, logger DualLogger) error {
 	if logger != nil {
 		logger.Log("✅ file.write 完成：%s", rel)
 	}
-	_ = "" // 占位避免未使用
+
+	if err := preflightOne(repo, rel, logger); err != nil {
+		if logger != nil {
+			logger.Log("❌ 预检失败：%s (%v)", rel, err)
+		}
+		return err
+	}
 	return nil
 }
 

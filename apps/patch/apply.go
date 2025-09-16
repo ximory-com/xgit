@@ -44,32 +44,11 @@ func ApplyOnce(logger *DualLogger, repo string, patch *Patch, patchFile string) 
 				return e
 			}
 		}
-
-		// 2) 预检：不再过滤新增，直接对所有改动文件执行预检
-		changed, _ := collectChangedFiles(repo) // 仍使用你现有实现
-		if len(changed) == 0 {
-			// 不在这里打印“无改动需要提交”，交给事务外统一处理
-			return nil
-		}
-
-		logf("🧪 预检（真实仓库）：%d 个文件", len(changed))
-		if err := preflightRun(repo, changed, logger); err != nil {
-			logf("❌ 预检失败：%v", err)
-			return err
-		}
-		logf("✅ 预检通过")
 		return nil
 	})
 
 	if err != nil {
 		log("❌ git.diff 事务失败：%v", err)
-		return
-	}
-
-	// 3) 提交 & 推送
-	changed, _ := collectChangedFiles(repo)
-	if len(changed) == 0 {
-		log("ℹ️ 无改动需要提交。")
 		return
 	}
 
@@ -85,6 +64,37 @@ func ApplyOnce(logger *DualLogger, repo string, patch *Patch, patchFile string) 
 	log("ℹ️ 提交说明：%s", commit)
 	log("ℹ️ 提交作者：%s", author)
 
+	// 统一纳入索引（避免未跟踪目录导致空提交）
+	if _, err := runGit(repo, logger, "add", "-A", "--"); err != nil {
+		log("❌ stage 失败：%v", err)
+		return
+	}
+
+	// 只看已暂存改动决定是否提交
+	out, _ := runGit(repo, logger, "diff", "--cached", "--name-only", "-z")
+	hasStaged := false
+	for _, p := range strings.Split(out, "\x00") {
+		if strings.TrimSpace(p) != "" {
+			hasStaged = true
+			break
+		}
+	}
+	if !hasStaged {
+		log("ℹ️ 无改动需要提交。")
+		return
+	}
+
+	if err := runCmd("git", "-C", repo, "commit", "--author", author, "-m", commit); err != nil {
+		log("❌ 提交失败：%v", err)
+		return
+	}
+	log("✅ 已提交：%s", commit)
+	log("🚀 正在推送（origin HEAD）…")
+	if _, err := runGit(repo, logger, "push", "origin", "HEAD"); err != nil {
+		log("❌ 推送失败：%v", err)
+		return
+	}
+	log("🚀 推送完成")
 	if err := runCmd("git", "-C", repo, "commit", "--author", author, "-m", commit); err != nil {
 		log("❌ 提交失败：%v", err)
 		return

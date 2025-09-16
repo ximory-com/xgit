@@ -1,5 +1,5 @@
 // run_preflight.go
-package main
+package fileops
 
 import (
 	"fmt"
@@ -10,8 +10,17 @@ import (
 	"xgit/apps/patch/preflight"
 )
 
+// 预检单个文件：仅在“文件存在且非目录”时执行（删除后/目录不预检）
+func preflightOne(repo, rel string, logger DualLogger) error {
+	full := filepath.Join(repo, rel)
+	if st, err := os.Stat(full); err == nil && !st.IsDir() {
+		return preflightRun(repo, []string{rel}, logger)
+	}
+	return nil
+}
+
 // 预检：对 files 中的每个文件选择合适的 Runner 并执行
-func preflightRun(repo string, files []string, logger *DualLogger) error {
+func preflightRun(repo string, files []string, logger DualLogger) error {
 	logf := func(format string, a ...any) {
 		if logger != nil {
 			logger.Log(format, a...)

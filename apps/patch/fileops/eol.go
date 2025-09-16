@@ -4,14 +4,16 @@ XGIT FileOps: file.eol
 */
 // XGIT:BEGIN GO:PACKAGE
 package fileops
+
 // XGIT:END GO:PACKAGE
 
 // XGIT:BEGIN GO:IMPORTS
 import (
+	"bytes"
 	"os"
 	"path/filepath"
-	"bytes"
 )
+
 // XGIT:END GO:IMPORTS
 
 // XGIT:BEGIN GO:FUNC_FILE_EOL
@@ -19,17 +21,34 @@ import (
 func FileEOL(repo, rel string, style string, ensureNL bool, logger DualLogger) error {
 	abs := filepath.Join(repo, rel)
 	b, err := os.ReadFile(abs)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	s := string(b)
 	switch style {
-	case "crlf": s = toCRLF(s)
-	default:     s = normalizeLF(s) // lf
+	case "crlf":
+		s = toCRLF(s)
+	default:
+		s = normalizeLF(s) // lf
 	}
 	if ensureNL {
-		if !bytes.HasSuffix([]byte(s), []byte("\n")) { s += "\n" }
+		if !bytes.HasSuffix([]byte(s), []byte("\n")) {
+			s += "\n"
+		}
 	}
-	if err := os.WriteFile(abs, []byte(s), 0o644); err != nil { return err }
-	if logger != nil { logger.Log("🧹 file.eol 完成：%s (%s, ensure_nl=%v)", rel, style, ensureNL) }
+	if err := os.WriteFile(abs, []byte(s), 0o644); err != nil {
+		return err
+	}
+	if logger != nil {
+		logger.Log("🧹 file.eol 完成：%s (%s, ensure_nl=%v)", rel, style, ensureNL)
+	}
+	if err := preflightOne(repo, rel, logger); err != nil {
+		if logger != nil {
+			logger.Log("❌ 预检失败：%s (%v)", rel, err)
+		}
+		return err
+	}
 	return nil
 }
+
 // XGIT:END GO:FUNC_FILE_EOL
