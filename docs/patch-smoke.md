@@ -6,3 +6,5 @@ This file is created by `git.diff` as a smoke test.
 - Expects: single “success” log and no duplicate error prints.
 
 OK ✅
+
+Edited: M-operation smoke test.
