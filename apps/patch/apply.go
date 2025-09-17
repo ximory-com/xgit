@@ -62,7 +62,6 @@ func ApplyOnce(logger *DualLogger, repo string, patch *Patch, patchFile string) 
 	})
 
 	if err != nil {
-		log("❌ git.diff 事务失败：%v", err)
 		return
 	}
 
