@@ -32,7 +32,7 @@ repo: <logical-repo-name>
 commitmsg: <commit message>
 author: Name <email>
 
-=== <cmd> "<path-or-empty>" [可选 header KV...] ===
+=== <cmd> "<path-or-empty>" ===
 <参数区（若有）——以 KV 或多行 keys...，详见下文>
 <body（正文区）——若指令需要正文>
 === end ===
@@ -41,8 +41,8 @@ author: Name <email>
 === PATCH EOF ===
 ```
 
-- `repo:`：逻辑名，映射 `.repos` 文件中的真实工作区路径；若缺省或空白使用 `default`（或由上层处理）。
-- `commitmsg:`、`author:`：为最终提交的默认值（ApplyOnce/commit 阶段使用）。`git.commit` 指令有特殊约束（见下）。
+- `repo:`：仓库名。
+- `commitmsg:`、`author:`：为最终提交的信息。
 - 每个指令块以 `=== <cmd> "<path>" ===` 开始，并以 `=== end ===` 结束。最后必须有 `=== PATCH EOF ===`（整包结尾）。
 - **正文区和参数区之间绝对不能有空行**。
 - 路径都必须是仓库相对路径，禁止绝对路径、禁止 `..` 越界。
@@ -85,10 +85,10 @@ author: Name <email>
 9. file.image
 
 ### line 系列（4）
-1. line.insert_before
-2. line.insert_after
+1. line.insert
+2. line.append
 3. line.replace
-4. line.delete_line
+4. line.delete
 
 ### block 系列（2）
 1. block.replace
@@ -99,12 +99,6 @@ author: Name <email>
 2. git.revert
 3. git.tag
 4. git.commit
-
----
-
-## 定位（keys / lineno / nth / offset / 区间）精确规则
-
-详见前述说明。
 
 ---
 
