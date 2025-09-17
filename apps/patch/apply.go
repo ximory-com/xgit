@@ -1,6 +1,7 @@
 package main
 
 import (
+    "sort"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -37,7 +38,20 @@ func ApplyOnce(logger *DualLogger, repo string, patch *Patch, patchFile string) 
 	// 2) 事务阶段
 	err = WithGitTxn(repo, logf, func() error {
 		// 1) 先应用所有指令
-		for i, op := range patch.Ops {
+    // 针对同一文件的 line.delete_line（带 lineno）按行号降序排序，避免删除引起的行号漂移
+    ops := patch.Ops
+    sort.SliceStable(ops, func(i, j int) bool {
+        oi, oj := ops[i], ops[j]
+        if oi.Cmd == "line.delete_line" && oj.Cmd == "line.delete_line" {
+            li := argInt(oi.Args, "lineno", 0)
+            lj := argInt(oj.Args, "lineno", 0)
+            if li > 0 && lj > 0 && oi.Path == oj.Path {
+                return li > lj // 大的行号先执行
+            }
+        }
+        return i < j
+    })
+    for i, op := range ops {
 			tag := fmt.Sprintf("%s #%d", op.Cmd, i+1)
 			if e := applyOp(repo, op, logger); e != nil {
 				logf("❌ %s 失败：%v", tag, e)
