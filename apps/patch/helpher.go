@@ -22,8 +22,8 @@ func runGit(repo string, logger *DualLogger, args ...string) (string, error) {
 				strings.HasPrefix(joined, "commit ") ||
 				strings.HasPrefix(joined, "status ")
 
-		// 像 "diff --cached --name-only -z" 这种就别打印了
-    if false && printable {
+			// 像 "diff --cached --name-only -z" 这种就别打印了
+		if false && printable {
 			if s := strings.TrimSpace(out); s != "" {
 				logger.Log("%s", s)
 			}
@@ -61,15 +61,32 @@ func gitCleanFD(repo string) error {
 	return runCmd("git", "-C", repo, "clean", "-fd")
 }
 
-// WithGitTxn：在 repo 上开启一次 Git 事务：fn() 出错则回滚到补丁前状态。
+// TxnOpts 控制事务的清理/回滚策略
+type TxnOpts struct {
+	CleanAtStart    bool // 开始前是否 git reset --hard + git clean -fd
+	RollbackOnError bool // 出错时是否回滚到 preHead 并清理
+}
+
+// 兼容原行为的便捷包装：默认 开场清理 + 失败回滚
 func WithGitTxn(repo string, logf func(string, ...any), fn func() error) error {
+	return WithGitTxnOpts(repo, logf, TxnOpts{
+		CleanAtStart:    true,
+		RollbackOnError: true,
+	}, fn)
+}
+
+// WithGitTxnOpts：在 repo 上开启一次 Git 事务；按选项控制清理/回滚
+func WithGitTxnOpts(repo string, logf func(string, ...any), opts TxnOpts, fn func() error) error {
 	preHead, _ := gitRevParseHEAD(repo)
-	_ = gitResetHard(repo, "")
-	_ = gitCleanFD(repo)
+
+	if opts.CleanAtStart {
+		_ = gitResetHard(repo, "")
+		_ = gitCleanFD(repo)
+	}
 
 	var err error
 	defer func() {
-		if err != nil {
+		if err != nil && opts.RollbackOnError {
 			if preHead != "" {
 				_ = gitResetHard(repo, preHead)
 			} else {

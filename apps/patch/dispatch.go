@@ -95,8 +95,10 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 		force := argBool(op.Args, "force", false)
 		return gitops.Tag(repo, name, ref, message, annotate, force, logger)
 
-	// ... 顶部 import 已经有： "xgit/apps/patch/fileops"
-	// 只需在 switch op.Cmd { ... } 里追加这些分支
+	case "git.commit":
+		// 这里故意不做事情：提交逻辑在 ApplyOnce 中统一执行。
+		// 有这个分支是为了避免“未知指令”报错。
+		return nil
 
 	case "line.insert":
 		return fileops.LineInsert(repo, op.Path, op.Body, op.Args, logger)

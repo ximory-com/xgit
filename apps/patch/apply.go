@@ -1,7 +1,6 @@
 package main
 
 import (
-    "sort"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -34,24 +33,50 @@ func ApplyOnce(logger *DualLogger, repo string, patch *Patch, patchFile string) 
 		}
 	}
 	logf := func(format string, a ...any) { log(format, a...) }
-
-	// 2) 事务阶段
-	err = WithGitTxn(repo, logf, func() error {
+	// ---- lineno 约束：最多 1 个，且必须出现在第一个指令 ----
+	hasLineNo := false
+	for i, op := range patch.Ops {
+		if strings.HasPrefix(op.Cmd, "line.") {
+			if n := argInt(op.Args, "lineno", 0); n > 0 {
+				if !hasLineNo {
+					hasLineNo = true
+					if i != 0 {
+						logf("❌ 非法补丁：带 lineno 的指令必须放在首个指令（当前在 #%d）", i+1)
+						return
+					}
+				} else {
+					logf("❌ 非法补丁：同一批次包含多个 lineno 操作，补丁需拆分执行")
+					return
+				}
+			}
+		}
+	}
+	// ---- 约束结束 ----
+	// ---- 约束结束 ----
+	hasCommit := false
+	for i, op := range patch.Ops {
+		if op.Cmd == "git.commit" {
+			if !hasCommit {
+				hasCommit = true
+				// git.commit 必须单独成批，且（自然）只能是第 1 条
+				if len(patch.Ops) != 1 || i != 0 {
+					logf("❌ 非法补丁：git.commit 必须单独使用且作为唯一指令（当前在 #%d，批内共 %d）", i+1, len(patch.Ops))
+					return
+				}
+			} else {
+				logf("❌ 非法补丁：同一批次包含多个 git.commit 指令，补丁需拆分执行")
+				return
+			}
+		}
+	}
+	opts := TxnOpts{
+		CleanAtStart:    !hasCommit, // 有 git.commit 就不要清理工作区
+		RollbackOnError: true,       // 失败仍然回滚（按你现有策略）
+	}
+	// 事务阶段
+	err = WithGitTxnOpts(repo, logf, opts, func() error {
 		// 1) 先应用所有指令
-    // 针对同一文件的 line.delete_line（带 lineno）按行号降序排序，避免删除引起的行号漂移
-    ops := patch.Ops
-    sort.SliceStable(ops, func(i, j int) bool {
-        oi, oj := ops[i], ops[j]
-        if oi.Cmd == "line.delete_line" && oj.Cmd == "line.delete_line" {
-            li := argInt(oi.Args, "lineno", 0)
-            lj := argInt(oj.Args, "lineno", 0)
-            if li > 0 && lj > 0 && oi.Path == oj.Path {
-                return li > lj // 大的行号先执行
-            }
-        }
-        return i < j
-    })
-    for i, op := range ops {
+		for i, op := range patch.Ops {
 			tag := fmt.Sprintf("%s #%d", op.Cmd, i+1)
 			if e := applyOp(repo, op, logger); e != nil {
 				logf("❌ %s 失败：%v", tag, e)
