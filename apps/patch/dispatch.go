@@ -96,6 +96,9 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 		return gitops.Tag(repo, name, ref, message, annotate, force, logger)
 
 	case "git.commit":
+        if logger != nil {
+            logger.Log("📝 执行 git.commit（仅记录，真实提交在 ApplyOnce 完成）")
+        }
 		// 这里故意不做事情：提交逻辑在 ApplyOnce 中统一执行。
 		// 有这个分支是为了避免“未知指令”报错。
 		return nil
