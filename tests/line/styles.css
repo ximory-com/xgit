@@ -1,0 +1,9 @@
+/* Basic styles */
+body {
+    margin: 0;
+    padding: 20px;
+}
+
+.container {
+    max-width: 800px;
+}
