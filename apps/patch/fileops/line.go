@@ -1,492 +1,114 @@
 package fileops
 
 import (
-	"bufio"
-	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
-	"strings"
 )
 
-// 依赖于外层提供：
-// - type DualLogger interface{ Log(format string, a ...any) }
-// - runGit(repo string, logger DualLogger, args ...string) (string, error)
-//
-// 约定：icase(默认1)、ensure_nl(默认1)、allow_noop(默认0)
-
-func LineInsertBefore(repo, rel string, body string, args map[string]string, logger DualLogger) error {
-	loc, err := resolveLine(repo, rel, args)
-	if err != nil {
-		return fmt.Errorf("line.insert_before: %w", err)
-	}
-	lines, e := readLines(filepath.Join(repo, rel))
-	if e != nil {
-		return e
-	}
-	insert := splitPayload(body)
-	lines = insertAt(lines, loc-1, insert) // before → 在目标行前插
-	if ensureNL(args, true) {
-		lines = ensureTrailingNL(lines)
-	}
-	if err := writeLines(filepath.Join(repo, rel), lines); err != nil {
-		return err
-	}
-	if logger != nil {
-		logger.Log("➕ insert_before %s:L%d (+%d)", rel, loc, len(insert))
-	}
-	_, _ = runGit(repo, logger, "add", "--", rel)
-	return nil
-}
-
-func LineInsertAfter(repo, rel string, body string, args map[string]string, logger DualLogger) error {
-	loc, err := resolveLine(repo, rel, args)
-	if err != nil {
-		return fmt.Errorf("line.insert_after: %w", err)
-	}
-	lines, e := readLines(filepath.Join(repo, rel))
-	if e != nil {
-		return e
-	}
-	insert := splitPayload(body)
-	lines = insertAt(lines, loc, insert) // after → 在目标行后插
-	if ensureNL(args, true) {
-		lines = ensureTrailingNL(lines)
-	}
-	if err := writeLines(filepath.Join(repo, rel), lines); err != nil {
-		return err
-	}
-	if logger != nil {
-		logger.Log("➕ insert_after  %s:L%d (+%d)", rel, loc, len(insert))
-	}
-	_, _ = runGit(repo, logger, "add", "--", rel)
-	return nil
-}
-
-func LineReplaceLine(repo, rel string, body string, args map[string]string, logger DualLogger) error {
-	loc, err := resolveLine(repo, rel, args)
-	if err != nil {
-		return fmt.Errorf("line.replace_line: %w", err)
-	}
-	lines, e := readLines(filepath.Join(repo, rel))
-	if e != nil {
-		return e
-	}
-	newLines := splitPayload(body)
-	old := lines[loc-1 : loc] // 仅做日志/幂等比对
-	noop := len(newLines) == 1 && strings.TrimRight(newLines[0], "\n") == strings.TrimRight(lines[loc-1], "\n")
-	if noop && !allowNoop(args) {
-		if logger != nil {
-			logger.Log("ℹ️ replace_line noop：%s:L%d 内容未变化", rel, loc)
-		}
-		return nil
-	}
-	// 用新行替换“这一行”，注意 replace_line 语义是“整行替换”，但允许多行（按你的规范）
-	lines = splice(lines, loc-1, 1, newLines)
-	if ensureNL(args, true) {
-		lines = ensureTrailingNL(lines)
-	}
-	if err := writeLines(filepath.Join(repo, rel), lines); err != nil {
-		return err
-	}
-	if logger != nil {
-		logger.Log("✏️ replace_line %s:L%d (1→%d)", rel, loc, len(newLines))
-		logger.Log("   -old: %q", strings.TrimRight(old[0], "\n"))
-		if len(newLines) == 1 {
-			logger.Log("   +new: %q", strings.TrimRight(newLines[0], "\n"))
-		} else {
-			logger.Log("   +new: %d lines", len(newLines))
-		}
-	}
-	_, _ = runGit(repo, logger, "add", "--", rel)
-	return nil
-}
-
-func LineDeleteLine(repo, rel string, args map[string]string, logger DualLogger) error {
-	loc, err := resolveLine(repo, rel, args)
-	if err != nil {
-		return fmt.Errorf("line.delete_line: %w", err)
-	}
-	lines, e := readLines(filepath.Join(repo, rel))
-	if e != nil {
-		return e
-	}
-	if loc < 1 || loc > len(lines) {
-		if allowNoop(args) {
-			if logger != nil {
-				logger.Log("ℹ️ delete_line noop：%s:L%d 超界/不存在", rel, loc)
-			}
-			return nil
-		}
-		return fmt.Errorf("delete_line: %s:L%d 超界/不存在", rel, loc)
-	}
-	removed := strings.TrimRight(lines[loc-1], "\n")
-	lines = splice(lines, loc-1, 1, nil)
-	if ensureNL(args, true) {
-		lines = ensureTrailingNL(lines)
-	}
-	if err := writeLines(filepath.Join(repo, rel), lines); err != nil {
-		return err
-	}
-	if logger != nil {
-		logger.Log("🗑️ delete_line  %s:L%d (-1) '%s'", rel, loc, removed)
-	}
-	_, _ = runGit(repo, logger, "add", "--", rel)
-	return nil
-}
-
-// 依赖（同包已存在）：
-// - type DualLogger interface{ Log(format string, a ...any) }
-// - resolveLine(repo, rel string, args map[string]string) (int, error)
-// - readLines(abs string) ([]string, error)
-// - writeLines(abs string, lines []string) error
-// - splice(lines []string, start, del int, insert []string) []string
-// - ensureTrailingNL(lines []string) []string
-// - ensureNL(args map[string]string, def bool) bool
-// - var RunGitFunc func(repo string, logger DualLogger, args ...string) (string, error)
-
-// LineDeleteBlock: 删除一段连续行（包含边界行）
-// 两种定位方式（二选一）：
-//  1. start_lineno + end_lineno
-//  2. start_keys   + end_keys   （各自唯一命中一行；keys 匹配规则与 line.* 相同）
-//
-// 兼容参数：icase、ensure_nl、allow_noop
-func LineDeleteBlock(repo, rel string, args map[string]string, logger DualLogger) error {
-	// 判断采用哪种模式
-	useLineNo := strings.TrimSpace(args["start_lineno"]) != "" || strings.TrimSpace(args["end_lineno"]) != ""
-
-	var start, end int
-	var err error
-	if useLineNo {
-		// 行号模式
-		if start, err = resolveLineWith(repo, rel, "start_lineno", "start_keys", args); err != nil {
-			return fmt.Errorf("line.delete_block: start 定位失败：%w", err)
-		}
-		if end, err = resolveLineWith(repo, rel, "end_lineno", "end_keys", args); err != nil {
-			return fmt.Errorf("line.delete_block: end 定位失败：%w", err)
-		}
-	} else {
-		// 关键字模式
-		if strings.TrimSpace(args["start_keys"]) == "" {
-			return fmt.Errorf("line.delete_block: 缺少 start_keys 或 start_lineno")
-		}
-		if strings.TrimSpace(args["end_keys"]) == "" {
-			return fmt.Errorf("line.delete_block: 缺少 end_keys 或 end_lineno")
-		}
-		if start, err = resolveLineWith(repo, rel, "start_lineno", "start_keys", args); err != nil {
-			return fmt.Errorf("line.delete_block: start 定位失败：%w", err)
-		}
-		if end, err = resolveLineWith(repo, rel, "end_lineno", "end_keys", args); err != nil {
-			return fmt.Errorf("line.delete_block: end 定位失败：%w", err)
-		}
-	}
-
-	if end < start {
-		return fmt.Errorf("line.delete_block: 非法范围 start=%d > end=%d", start, end)
-	}
-
+// line.insert  —— 在定位到的“目标行”之前插入（支持多行）
+func LineInsert(repo, rel, body string, args map[string]string, logger DualLogger) error {
 	abs := filepath.Join(repo, rel)
-	lines, e := readLines(abs)
-	if e != nil {
-		return e
+	lines, err := readLines(abs)
+	if err != nil {
+		return err
 	}
-
-	// 越界/空范围处理
-	if start < 1 || start > len(lines) || end < 1 {
-		if strings.EqualFold(strings.TrimSpace(args["allow_noop"]), "1") {
-			if logger != nil {
-				logger.Log("ℹ️ delete_block noop：%s [%d..%d] 越界/空范围", rel, start, end)
-			}
-			return nil
-		}
-		return fmt.Errorf("line.delete_block: 范围越界 start=%d end=%d（1..%d）", start, end, len(lines))
+	sc, err := resolveScope(lines, args) // 无 start-keys → 全文
+	if err != nil {
+		return fmt.Errorf("line.insert: %w", err)
 	}
-	if end > len(lines) {
-		end = len(lines)
+	loc, err := resolveLineInScope(lines, sc, args)
+	if err != nil {
+		return fmt.Errorf("line.insert: %w", err)
 	}
-	delN := end - start + 1
-	if delN <= 0 {
-		if strings.EqualFold(strings.TrimSpace(args["allow_noop"]), "1") {
-			if logger != nil {
-				logger.Log("ℹ️ delete_block noop：%s 空范围 [%d..%d]", rel, start, end)
-			}
-			return nil
-		}
-		return fmt.Errorf("line.delete_block: 空范围 [%d..%d]", start, end)
-	}
-
-	// 执行删除
-	lines = splice(lines, start-1, delN, nil)
-	if ensureNL(args, true) {
-		lines = ensureTrailingNL(lines)
-	}
+	insert := splitPayload(body)
+	lines = insertAt(lines, loc-1, insert)
+	lines = ensureTrailingNL(lines)
 	if err := writeLines(abs, lines); err != nil {
 		return err
 	}
-
 	if logger != nil {
-		logger.Log("🗑️ delete_block %s:[%d..%d] (-%d)", rel, start, end, delN)
+		logger.Log("➕ line.insert: %s:L%d (+%d)", rel, loc, len(insert))
 	}
-	_, _ = runGit(repo, logger, "add", "--", rel)
-
-	return nil
+	return stageAndPreflight(repo, rel, logger)
 }
 
-// —— 辅助 ——
-// 将 *_lineno / *_keys 适配为 resolveLine 使用的 "lineno"/"keys"
-func resolveLineWith(repo, rel, linenoKey, keysKey string, args map[string]string) (int, error) {
-	sub := map[string]string{
-		"icase":      args["icase"],
-		"ensure_nl":  args["ensure_nl"],
-		"allow_noop": args["allow_noop"],
-	}
-	if v := strings.TrimSpace(args[linenoKey]); v != "" {
-		sub["lineno"] = v
-	}
-	if v := strings.TrimSpace(args[keysKey]); v != "" {
-		sub["keys"] = v
-	}
-	return resolveLine(repo, rel, sub)
-}
-
-// ---------- 定位/辅助 ----------
-
-func resolveLine(repo, rel string, args map[string]string) (int, error) {
-	path := filepath.Join(repo, rel)
-	lines, err := readLines(path)
+// line.append —— 在定位到的“目标行”之后插入（支持多行）
+func LineAppend(repo, rel, body string, args map[string]string, logger DualLogger) error {
+	abs := filepath.Join(repo, rel)
+	lines, err := readLines(abs)
 	if err != nil {
-		return 0, err
-	}
-	// 1) 行号优先
-	if n := parseInt(args["lineno"]); n > 0 {
-		if n < 1 || n > len(lines) {
-			return 0, fmt.Errorf("定位失败：行号 %d 超界（1..%d）", n, len(lines))
-		}
-		return n, nil
-	}
-	// 2) keys 宽松 AND 定位（忽略大小写、忽略行首缩进）
-	var keys []string
-	if v := strings.TrimSpace(args["keys"]); v != "" {
-		keys = explodeKeys(v)
-	}
-	if len(keys) == 0 {
-		return 0, errors.New("定位失败：缺少 lineno>0 或 keys")
-	}
-	icase := parseBoolDefault1(args["icase"])
-	hits := make([]int, 0, 1)
-	for i, raw := range lines {
-		cand := strings.TrimLeft(raw, " \t")
-		if icase {
-			cand = strings.ToLower(cand)
-		}
-		ok := true
-		for _, k := range keys {
-			kk := k
-			if icase {
-				kk = strings.ToLower(kk)
-			}
-			if !strings.Contains(cand, kk) {
-				ok = false
-				break
-			}
-		}
-		if ok {
-			hits = append(hits, i+1)
-		}
-	}
-	switch len(hits) {
-	case 0:
-		return 0, fmt.Errorf("定位失败：keys 未命中。样本前后：\n%s", sampleAround(lines, keys, 2))
-	case 1:
-		return hits[0], nil
-	default:
-		if len(hits) > 5 {
-			hits = hits[:5]
-		}
-		return 0, fmt.Errorf("定位失败：多处命中 %v，请增加 keys 或改用 lineno", hits)
-	}
-}
-
-func readLines(abs string) ([]string, error) {
-	data, err := os.ReadFile(abs)
-	if err != nil {
-		return nil, err
-	}
-	// 统一读取为“以 \n 结尾的行切片”
-	sc := bufio.NewScanner(strings.NewReader(string(data)))
-	sc.Split(bufio.ScanLines)
-	var lines []string
-	for sc.Scan() {
-		lines = append(lines, sc.Text()+"\n")
-	}
-	// 如果源文件为空或不以 \n 结尾，Scanner 不会补最后一行的 \n，这里手动处理：
-	if len(data) > 0 && data[len(data)-1] != '\n' {
-		if len(lines) == 0 {
-			lines = []string{""}
-		} else {
-			lines[len(lines)-1] = strings.TrimRight(lines[len(lines)-1], "\n")
-		}
-	}
-	return lines, nil
-}
-
-func writeLines(abs string, lines []string) error {
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return err
 	}
-	sb := strings.Builder{}
-	for _, l := range lines {
-		sb.WriteString(l)
+	sc, err := resolveScope(lines, args)
+	if err != nil {
+		return fmt.Errorf("line.append: %w", err)
 	}
-	return os.WriteFile(abs, []byte(sb.String()), 0o644)
+	loc, err := resolveLineInScope(lines, sc, args)
+	if err != nil {
+		return fmt.Errorf("line.append: %w", err)
+	}
+	insert := splitPayload(body)
+	lines = insertAt(lines, loc, insert)
+	lines = ensureTrailingNL(lines)
+	if err := writeLines(abs, lines); err != nil {
+		return err
+	}
+	if logger != nil {
+		logger.Log("➕ line.append: %s:L%d (+%d)", rel, loc, len(insert))
+	}
+	return stageAndPreflight(repo, rel, logger)
 }
 
-func splitPayload(body string) []string {
-	// 原样保留，确保每行带 \n；空正文返回空切片（允许插入空）
-	if body == "" {
-		return nil
+// line.replace —— 将“目标行”整行替换为正文（支持多行）
+func LineReplace(repo, rel, body string, args map[string]string, logger DualLogger) error {
+	abs := filepath.Join(repo, rel)
+	lines, err := readLines(abs)
+	if err != nil {
+		return err
 	}
-	// 规范：以 \n 分割，保留 \n
-	raw := strings.Split(body, "\n")
-	out := make([]string, 0, len(raw))
-	for i, s := range raw {
-		if i == len(raw)-1 {
-			// body 末尾可能有/没有 \n；如果没有，补一个，以保证行模型一致
-			if s == "" {
-				// 末尾空行 → 代表 body 以 \n 结束，上一行已带 \n，这里忽略
-				continue
-			}
-			out = append(out, s+"\n")
-		} else {
-			out = append(out, s+"\n")
-		}
+	sc, err := resolveScope(lines, args)
+	if err != nil {
+		return fmt.Errorf("line.replace: %w", err)
 	}
-	return out
+	loc, err := resolveLineInScope(lines, sc, args)
+	if err != nil {
+		return fmt.Errorf("line.replace: %w", err)
+	}
+	newLines := splitPayload(body)
+	lines = splice(lines, loc-1, 1, newLines)
+	lines = ensureTrailingNL(lines)
+	if err := writeLines(abs, lines); err != nil {
+		return err
+	}
+	if logger != nil {
+		logger.Log("✏️ line.replace: %s:L%d (1→%d)", rel, loc, len(newLines))
+	}
+	return stageAndPreflight(repo, rel, logger)
 }
 
-func insertAt(lines []string, idx int, insert []string) []string {
-	if idx < 0 {
-		idx = 0
+// line.delete —— 删除“目标行”
+func LineDelete(repo, rel string, args map[string]string, logger DualLogger) error {
+	abs := filepath.Join(repo, rel)
+	lines, err := readLines(abs)
+	if err != nil {
+		return err
 	}
-	if idx > len(lines) {
-		idx = len(lines)
+	sc, err := resolveScope(lines, args)
+	if err != nil {
+		return fmt.Errorf("line.delete: %w", err)
 	}
-	head := append([]string{}, lines[:idx]...)
-	tail := append([]string{}, lines[idx:]...)
-	return append(append(head, insert...), tail...)
-}
-
-func splice(lines []string, start, del int, insert []string) []string {
-	if start < 0 {
-		start = 0
+	loc, err := resolveLineInScope(lines, sc, args)
+	if err != nil {
+		return fmt.Errorf("line.delete: %w", err)
 	}
-	if start > len(lines) {
-		start = len(lines)
+	old := lines[loc-1]
+	lines = splice(lines, loc-1, 1, nil)
+	lines = ensureTrailingNL(lines)
+	if err := writeLines(abs, lines); err != nil {
+		return err
 	}
-	end := start + del
-	if end > len(lines) {
-		end = len(lines)
+	if logger != nil {
+		logger.Log("🗑️ line.delete: %s:L%d (-1) %q", rel, loc, old)
 	}
-	head := append([]string{}, lines[:start]...)
-	tail := append([]string{}, lines[end:]...)
-	return append(append(head, insert...), tail...)
-}
-
-func ensureTrailingNL(lines []string) []string {
-	if len(lines) == 0 {
-		return []string{""}
-	}
-	last := lines[len(lines)-1]
-	if !strings.HasSuffix(last, "\n") {
-		lines[len(lines)-1] = last + "\n"
-	}
-	return lines
-}
-
-func parseInt(s string) int {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0
-	}
-	n := 0
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return 0
-		}
-		n = n*10 + int(r-'0')
-	}
-	return n
-}
-func parseBoolDefault1(s string) bool {
-	if strings.TrimSpace(s) == "" {
-		return true
-	}
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "1", "true", "yes", "y", "on":
-		return true
-	default:
-		return false
-	}
-}
-func allowNoop(args map[string]string) bool {
-	switch strings.ToLower(strings.TrimSpace(args["allow_noop"])) {
-	case "1", "true", "yes", "y", "on":
-		return true
-	default:
-		return false
-	}
-}
-
-func explodeKeys(v string) []string {
-	v = strings.ReplaceAll(v, "\r\n", "\n")
-	v = strings.ReplaceAll(v, "\r", "\n")
-	// 支持三种：多行、竖线分隔、逗号分隔（宽松）
-	parts := make([]string, 0, 4)
-	for _, seg := range strings.Split(v, "\n") {
-		seg = strings.TrimSpace(seg)
-		if seg == "" {
-			continue
-		}
-		if strings.Contains(seg, "|") {
-			for _, s := range strings.Split(seg, "|") {
-				ss := strings.TrimSpace(s)
-				if ss != "" {
-					parts = append(parts, ss)
-				}
-			}
-			continue
-		}
-		if strings.Contains(seg, ",") {
-			for _, s := range strings.Split(seg, ",") {
-				ss := strings.TrimSpace(s)
-				if ss != "" {
-					parts = append(parts, ss)
-				}
-			}
-			continue
-		}
-		parts = append(parts, seg)
-	}
-	return parts
-}
-
-func sampleAround(lines []string, keys []string, k int) string {
-	// 简化：返回文件头尾各 k 行（避免再次模糊匹配）
-	sb := strings.Builder{}
-	max := len(lines)
-	if k > max {
-		k = max
-	}
-	sb.WriteString("  [head]\n")
-	for i := 0; i < k; i++ {
-		fmt.Fprintf(&sb, "   %4d| %s", i+1, lines[i])
-	}
-	sb.WriteString("  [tail]\n")
-	for i := max - k; i < max; i++ {
-		if i < 0 {
-			continue
-		}
-		fmt.Fprintf(&sb, "   %4d| %s", i+1, lines[i])
-	}
-	return sb.String()
+	return stageAndPreflight(repo, rel, logger)
 }

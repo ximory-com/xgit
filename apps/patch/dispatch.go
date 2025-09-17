@@ -95,16 +95,27 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 		force := argBool(op.Args, "force", false)
 		return gitops.Tag(repo, name, ref, message, annotate, force, logger)
 
-	case "line.insert_before":
-		return fileops.LineInsertBefore(repo, op.Path, op.Body, op.Args, logger)
-	case "line.insert_after":
-		return fileops.LineInsertAfter(repo, op.Path, op.Body, op.Args, logger)
-	case "line.replace_line":
-		return fileops.LineReplaceLine(repo, op.Path, op.Body, op.Args, logger)
-	case "line.delete_line":
-		return fileops.LineDeleteLine(repo, op.Path, op.Args, logger)
-	case "line.delete_block":
-		return fileops.LineDeleteBlock(repo, op.Path, op.Args, logger)
+	// ... 顶部 import 已经有： "xgit/apps/patch/fileops"
+	// 只需在 switch op.Cmd { ... } 里追加这些分支
+
+	case "line.insert":
+		return fileops.LineInsert(repo, op.Path, op.Body, op.Args, logger)
+
+	case "line.append":
+		return fileops.LineAppend(repo, op.Path, op.Body, op.Args, logger)
+
+	case "line.replace":
+		return fileops.LineReplace(repo, op.Path, op.Body, op.Args, logger)
+
+	case "line.delete":
+		return fileops.LineDelete(repo, op.Path, op.Args, logger)
+
+	case "block.delete":
+		return fileops.BlockDelete(repo, op.Path, op.Args, logger)
+
+	case "block.replace":
+		return fileops.BlockReplace(repo, op.Path, op.Body, op.Args, logger)
+
 	default:
 		return errors.New("未知指令: " + op.Cmd)
 	}
