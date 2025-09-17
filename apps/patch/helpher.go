@@ -23,7 +23,7 @@ func runGit(repo string, logger *DualLogger, args ...string) (string, error) {
 				strings.HasPrefix(joined, "status ")
 
 		// 像 "diff --cached --name-only -z" 这种就别打印了
-		if printable {
+    if false && printable {
 			if s := strings.TrimSpace(out); s != "" {
 				logger.Log("%s", s)
 			}
