@@ -76,7 +76,6 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 	case "git.diff":
 		return gitops.Diff(repo, op.Body, logger)
 
-
 	case "git.reset":
 		ref := strings.TrimSpace(argStr(op.Args, "ref", strings.TrimSpace(op.Body)))
 		if ref == "" {
@@ -86,18 +85,29 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 		return gitops.Reset(repo, ref, mode, logger)
 
 	case "git.revert":
-		ref := strings.TrimSpace(argStr(op.Args, "ref", strings.TrimSpace(op.Body)))
+		// 统一处理 git.revert 的入参：ref/spec/body + no_commit/strategy(兼容)
+		ref := strings.TrimSpace(argStr(op.Args, "ref", ""))
+		if ref == "" {
+			ref = strings.TrimSpace(argStr(op.Args, "spec", ""))
+		}
+		if ref == "" {
+			ref = strings.TrimSpace(op.Body)
+		}
 		if ref == "" {
 			return errors.New("git.revert: 缺少要撤销的提交 ref")
 		}
+
+		// 是否 --no-commit（优先读 no_commit，其次兼容 legacy strategy）
 		noCommit := argBool(op.Args, "no_commit", false)
-		return gitops.Revert(repo, ref, noCommit, logger)
-		spec := strings.TrimSpace(argStr(op.Args, "spec", op.Body))
-		if spec == "" {
-			return errors.New("git.revert: missing spec")
+		if !noCommit {
+			strategy := strings.ToLower(strings.TrimSpace(argStr(op.Args, "strategy", "")))
+			if strategy == "no-commit" || strategy == "no_commit" {
+				noCommit = true
+			}
 		}
-		strategy := strings.TrimSpace(argStr(op.Args, "strategy", "abort"))
-		return gitops.Revert(repo, spec, strategy, logger)
+
+		// 正确签名：Revert(repo, ref, noCommit, logger)
+		return gitops.Revert(repo, ref, noCommit, logger)
 
 	case "git.tag":
 		name := strings.TrimSpace(argStr(op.Args, "name", ""))
@@ -111,9 +121,9 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 		return gitops.Tag(repo, name, ref, message, annotate, force, logger)
 
 	case "git.commit":
-        if logger != nil {
-            logger.Log("📝 执行 git.commit（仅记录，真实提交在 ApplyOnce 完成）")
-        }
+		if logger != nil {
+			logger.Log("📝 执行 git.commit（仅记录，真实提交在 ApplyOnce 完成）")
+		}
 		// 这里故意不做事情：提交逻辑在 ApplyOnce 中统一执行。
 		// 有这个分支是为了避免“未知指令”报错。
 		return nil
