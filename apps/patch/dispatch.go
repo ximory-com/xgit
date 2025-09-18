@@ -76,7 +76,22 @@ func applyOp(repo string, op *FileOp, logger *DualLogger) error {
 	case "git.diff":
 		return gitops.Diff(repo, op.Body, logger)
 
+
+	case "git.reset":
+		ref := strings.TrimSpace(argStr(op.Args, "ref", strings.TrimSpace(op.Body)))
+		if ref == "" {
+			return errors.New("git.reset: 缺少目标提交 ref")
+		}
+		mode := strings.TrimSpace(argStr(op.Args, "mode", "hard"))
+		return gitops.Reset(repo, ref, mode, logger)
+
 	case "git.revert":
+		ref := strings.TrimSpace(argStr(op.Args, "ref", strings.TrimSpace(op.Body)))
+		if ref == "" {
+			return errors.New("git.revert: 缺少要撤销的提交 ref")
+		}
+		noCommit := argBool(op.Args, "no_commit", false)
+		return gitops.Revert(repo, ref, noCommit, logger)
 		spec := strings.TrimSpace(argStr(op.Args, "spec", op.Body))
 		if spec == "" {
 			return errors.New("git.revert: missing spec")

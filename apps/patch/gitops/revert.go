@@ -7,37 +7,35 @@ import (
 )
 
 // XGIT:BEGIN GITOPS REVERT
-// 将仓库重置到指定提交（语义同 `git reset`，非“反向提交”的 git revert）。
-func Revert(repo, ref, mode string, logger DualLogger) error {
+// Revert 撤销指定提交的更改（真正的git revert功能）
+func Revert(repo, ref string, noCommit bool, logger DualLogger) error {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return errors.New("git.revert: 缺少 ref（如 HEAD~1 或提交 SHA）")
+		return errors.New("git.revert: 缺少要撤销的提交 ref")
 	}
-	mode = strings.ToLower(strings.TrimSpace(mode))
-	if mode == "" {
-		mode = "hard"
+
+	args := []string{"revert"}
+	if noCommit {
+		args = append(args, "--no-commit") // 不自动提交，仅应用更改到暂存区
 	}
-	var flag string
-	switch mode {
-	case "hard":
-		flag = "--hard"
-	case "mixed":
-		flag = "--mixed"
-	case "soft":
-		flag = "--soft"
-	default:
-		return fmt.Errorf("git.revert: 不支持的 mode=%q（hard|mixed|soft）", mode)
+	args = append(args, ref)
+
+	if logger != nil {
+		if noCommit {
+			logger.Log("↩️ git.revert: 撤销提交 %s（不自动提交）", ref)
+		} else {
+			logger.Log("↩️ git.revert: 撤销提交 %s（自动创建新提交）", ref)
+		}
+	}
+
+	if _, err := runGit(repo, logger, args...); err != nil {
+		return fmt.Errorf("git.revert 执行失败：%w", err)
 	}
 
 	if logger != nil {
-		logger.Log("↩️  git.revert 到 %s（%s）", ref, mode)
-	}
-	if _, err := runGit(repo, logger, "reset", flag, ref); err != nil {
-		return fmt.Errorf("git.revert 失败：%w", err)
-	}
-	if logger != nil {
-		logger.Log("✅ git.revert 完成：%s（%s）", ref, mode)
+		logger.Log("✅ git.revert 完成：已撤销提交 %s", ref)
 	}
 	return nil
 }
+
 // XGIT:END GITOPS REVERT
