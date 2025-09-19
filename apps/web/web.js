@@ -231,7 +231,15 @@ function mdToHtml(md=''){
     $('#repoList').innerHTML = `<li>${esc(t('noRepos'))}</li>`;
     return;
   }
+  const token = localStorage.getItem(LS_TOKEN); if(!token) return;
+  $('#repoList').innerHTML = '<li class="muted">Loading…</li>';
+nthl=1
 async function loadRepos(){
+  const token = localStorage.getItem(LS_TOKEN); if(!token) return;
+  
+  $('#repoList').hidden = false;
+  $('#repoEmpty').hidden = true;
+  $('#repoList').innerHTML = '<li class="muted" style="padding:20px;text-align:center">Loading…</li>';
   const token = localStorage.getItem(LS_TOKEN); if(!token) return;
   
   $('#repoList').hidden = false;
