@@ -43,6 +43,7 @@ function applyI18n(){
 /* ---------- auth/api ---------- */
 const LS_TOKEN = 'xgit_token';
 let currentRepo = null; // 当前查看的仓库信息
+let currentRepo = null; // 当前查看的仓库信息
 async function fetchJson(url, token){
   const base = {'Accept':'application/vnd.github+json'};
   const tries = token ? [
