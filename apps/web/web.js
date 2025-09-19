@@ -211,7 +211,34 @@ function mdToHtml(md=''){
 }
 
 /* ---------- repos ---------- */
+  const token = localStorage.getItem(LS_TOKEN); if(!token) return;
+  $('#repoList').innerHTML = '<li class="muted">Loading…</li>';
+  let repos = [];
+  try{ repos = await apiRepos({ per_page: 100, page: 1 }); }
+  catch(e){ $('#repoList').innerHTML='<li class="muted">Failed</li>'; return; }
+
+  if(!Array.isArray(repos) || repos.length===0){
+    $('#repoList').innerHTML = `<li>${esc(t('noRepos'))}</li>`;
+    return;
+  }
 async function loadRepos(){
+  const token = localStorage.getItem(LS_TOKEN); if(!token) return;
+  
+  $('#repoList').hidden = false;
+  $('#repoEmpty').hidden = true;
+  $('#repoList').innerHTML = '<li class="muted" style="padding:20px;text-align:center">Loading…</li>';
+  
+  let repos = [];
+  try{ repos = await apiRepos({ per_page: 100, page: 1 }); }
+  catch(e){ 
+    $('#repoList').innerHTML='<li class="muted" style="padding:20px;text-align:center;color:#e74c3c">加载失败</li>'; 
+    return; 
+  }
+
+  if(!Array.isArray(repos) || repos.length===0){
+    $('#repoList').innerHTML = `<li class="muted" style="padding:20px;text-align:center">${t('noRepos') || '暂无仓库'}</li>`;
+    return;
+  }
   const token = localStorage.getItem(LS_TOKEN); if(!token) return;
   $('#repoList').innerHTML = '<li class="muted">Loading…</li>';
   let repos = [];
