@@ -234,3 +234,109 @@ async function boot(){
   if(me) await loadRepos();
 }
 boot();
+/* ===== XGit Files Widget (non-intrusive) ===== */
+(function(){
+  const $ = (s, el=document)=> el.querySelector(s);
+  const $$ = (s, el=document)=> Array.from(el.querySelectorAll(s));
+
+  const LS_CANDIDATE_KEYS = ["LS_TOKEN", "xgit.token", "token", "github.token"];
+  function readToken(){
+    // 1) 现有页面中可能已存在的输入框
+    const inp = document.getElementById("tokenInput");
+    if(inp && inp.value && inp.value.trim()) return inp.value.trim();
+    // 2) 本地存储里的若干候选 key
+    for(const k of LS_CANDIDATE_KEYS){
+      const v = localStorage.getItem(k);
+      if(v && v.trim()) return v.trim();
+    }
+    // 3) 从 sessionStorage 兜底
+    for(const k of LS_CANDIDATE_KEYS){
+      const v = sessionStorage.getItem(k);
+      if(v && v.trim()) return v.trim();
+    }
+    return "";
+  }
+
+  async function apiContents(owner, repo, path='', ref){
+    const tk = readToken(); if(!tk) throw new Error("No token");
+    const headers = {'Accept':'application/vnd.github+json','Authorization':'Bearer '+tk};
+    const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path||'')}?` + new URLSearchParams(ref?{ref}:{});
+    const r = await fetch(url, {headers});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    return await r.json();
+  }
+  async function apiFileRaw(owner, repo, path, ref){
+    const tk = readToken(); if(!tk) throw new Error("No token");
+    const headers = {'Accept':'application/vnd.github.v3.raw','Authorization':'Bearer '+tk};
+    const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?` + new URLSearchParams(ref?{ref}:{});
+    const r = await fetch(url, {headers});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    return await r.text();
+  }
+
+  function openPanel(){ $("#xg-files-panel")?.classList.remove("hidden"); }
+  function closePanel(){ $("#xg-files-panel")?.classList.add("hidden"); }
+
+  async function renderRoot(owner, repo, branch){
+    const list = $("#xg-filelist");
+    const box  = $("#xg-filebox");
+    if(!list || !box) return;
+
+    list.innerHTML = `<li class="muted">Loading…</li>`;
+    box.classList.add("hidden");
+
+    let items=[];
+    try{
+      items = await apiContents(owner, repo, '', branch);
+    }catch(e){
+      list.innerHTML = `<li class="muted">加载失败</li>`;
+      return;
+    }
+
+    list.innerHTML = (items||[]).map(it=>{
+      const icon = it.type==='dir' ? '📁' : '📄';
+      return `<li class="xg-file" data-path="${it.path}" data-type="${it.type}">${icon} ${it.name}</li>`;
+    }).join('') || `<li class="muted">空目录</li>`;
+
+    $$(".xg-file", list).forEach(li=>{
+      if(li.dataset.type === "file"){
+        li.onclick = async ()=>{
+          $$(".xg-file.active", list).forEach(x=>x.classList.remove("active"));
+          li.classList.add("active");
+          box.textContent = "Loading…";
+          box.classList.remove("hidden");
+          try{
+            const txt = await apiFileRaw(owner, repo, li.dataset.path, branch);
+            box.textContent = txt || "[Empty file]";
+          }catch{
+            box.textContent = "[Failed]";
+          }
+        };
+      }
+    });
+  }
+
+  // 事件绑定（浮动按钮 & 面板控件）
+  function bind(){
+    const btn = $("#xg-files-btn");
+    const panel = $("#xg-files-panel");
+    if(!btn || !panel) return;
+
+    btn.onclick = ()=> openPanel();
+    $("#xg-close").onclick = ()=> closePanel();
+    $("#xg-load").onclick = ()=>{
+      const owner = $("#xg-owner").value.trim();
+      const repo  = $("#xg-repo").value.trim();
+      const br    = $("#xg-branch").value.trim();
+      if(!owner || !repo){ alert("请填写 Owner 与 Repo"); return; }
+      renderRoot(owner, repo, br);
+    };
+  }
+
+  // 页面就绪后初始化（不干扰现有脚本）
+  if(document.readyState === "loading"){
+    document.addEventListener("DOMContentLoaded", bind, {once:true});
+  }else{
+    bind();
+  }
+})();

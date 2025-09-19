@@ -87,3 +87,34 @@ section.hero img.logo,
   height: auto !important;
   margin: 0 auto 16px !important;
 }
+/* ===== XGit Files Widget (non-intrusive) ===== */
+.xg-floating-btn{
+  position:fixed; right:16px; bottom:16px; z-index:9999;
+  background:#0072BB; color:#fff; border-radius:999px;
+  width:48px; height:48px; display:flex; align-items:center; justify-content:center;
+  box-shadow:0 8px 24px rgba(0,0,0,.15); cursor:pointer; user-select:none
+}
+.xg-panel{
+  position:fixed; right:16px; bottom:80px; width:92vw; max-width:920px; height:70vh;
+  background:#fff; color:#222; border:1px solid #e8e8e8; border-radius:12px;
+  box-shadow:0 10px 30px rgba(0,0,0,.18); z-index:9999; display:flex; flex-direction:column
+}
+.xg-panel.hidden{display:none}
+.xg-panel-head{display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-bottom:1px solid #eee}
+.xg-title{font-weight:600}
+.xg-panel-row{display:flex; gap:8px; align-items:center; padding:8px 12px}
+.xg-panel-row label{min-width:64px; font-size:.9rem; color:#555}
+.xg-panel-row input{flex:1; padding:8px 10px; border:1px solid #e5e5e5; border-radius:8px; outline:none}
+.xg-btn{padding:7px 12px; border:1px solid #e5e5e5; border-radius:8px; background:#fff; cursor:pointer}
+.xg-btn.primary{background:#0072BB; color:#fff; border-color:#0072BB}
+.xg-panel-body{display:flex; gap:12px; padding:12px; overflow:hidden; height:100%}
+.xg-filelist{list-style:none; margin:0; padding:0; width:38%; border-right:1px solid #eee; overflow:auto}
+.xg-filelist li{padding:6px 8px; border-radius:6px; cursor:pointer}
+.xg-filelist li:hover{background:#f7f9fc}
+.xg-filelist li.active{background:#eef3ff}
+.xg-viewer{flex:1; margin:0; padding:10px; background:#fafafa; border:1px solid #eee; border-radius:8px; overflow:auto; white-space:pre-wrap}
+@media (max-width: 720px){
+  .xg-panel{height:78vh}
+  .xg-panel-body{flex-direction:column}
+  .xg-filelist{width:100%; height:40%; border-right:none; border-bottom:1px solid #eee}
+}

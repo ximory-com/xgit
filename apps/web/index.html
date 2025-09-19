@@ -137,5 +137,32 @@
   </main>
 
   <script src="./web.js"></script>
+<!-- XGit Files Widget: 独立面板，不影响现有结构 -->
+<div id="xg-files-btn" class="xg-floating-btn" title="文件浏览">📂</div>
+
+<div id="xg-files-panel" class="xg-panel hidden">
+  <div class="xg-panel-head">
+    <div class="xg-title">文件浏览</div>
+    <button id="xg-close" class="xg-btn">✕</button>
+  </div>
+  <div class="xg-panel-row">
+    <label>Owner</label><input id="xg-owner" placeholder="owner，如 ximory-com" />
+  </div>
+  <div class="xg-panel-row">
+    <label>Repo</label><input id="xg-repo" placeholder="repo，如 xgit" />
+  </div>
+  <div class="xg-panel-row">
+    <label>Branch</label><input id="xg-branch" placeholder="main / master / 任意分支" />
+  </div>
+  <div class="xg-panel-row">
+    <button id="xg-load" class="xg-btn primary">加载根目录</button>
+  </div>
+
+  <div class="xg-panel-body">
+    <ul id="xg-filelist" class="xg-filelist"></ul>
+    <pre id="xg-filebox" class="xg-viewer hidden">-</pre>
+  </div>
+</div>
+</body>
 </body>
 </html>
