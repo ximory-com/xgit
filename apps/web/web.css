@@ -1,4 +1,35 @@
-/* 官网导航样式 */
+.top{
+  position:sticky;top:0;z-index:20;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 16px;background:rgba(255,255,255,.85);backdrop-filter:saturate(180%) blur(12px);
+  border-bottom:1px solid var(--line);
+}
+.brand{display:flex;align-items:center;gap:10px;color:var(--txt);text-decoration:none}
+.brand-logo{width:28px;height:28px}
+.brand-name{font-weight:700}
+.nav{display:flex;align-items:center;gap:18px}
+.nav a{color:var(--txt);text-decoration:none}
+.lang button{
+  padding:6px 10px;border:1px solid var(--line);background:#fff;border-radius:999px;cursor:pointer;font-size:14px
+}
+.lang button.active{background:var(--brand);color:#fff;border-color:var(--brand)}
+/* 修复导航样式 */
+.top{
+  position:sticky;top:0;z-index:20;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 16px;background:rgba(255,255,255,.85);backdrop-filter:saturate(180%) blur(12px);
+  border-bottom:1px solid var(--line);
+}
+.brand{display:flex;align-items:center;gap:10px;color:var(--txt);text-decoration:none}
+.brand-logo{width:28px!important;height:28px!important}
+.brand-name{font-weight:700}
+.nav{display:flex;align-items:center;gap:18px}
+.nav a{color:var(--txt);text-decoration:none}
+.lang{display:flex;gap:4px}
+.lang button{
+  padding:6px 10px;border:1px solid var(--line);background:#fff;border-radius:999px;cursor:pointer;font-size:14px
+}
+.lang button.active{background:var(--brand);color:#fff;border-color:var(--brand)}
 .top{
   position:sticky;top:0;z-index:20;
   display:flex;align-items:center;justify-content:space-between;
