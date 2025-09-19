@@ -7,6 +7,21 @@ const esc = s => String(s??'').replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>'
 let lang = (localStorage.getItem('xgit_lang') || ((navigator.language||'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en'));
 const dict = {
   zh: {
+    signIn: '用 Token 登录', signOut: '退出登录', refresh: '刷新', backToSite:'返回官网', back:'返回',
+    welcomeTitle:'欢迎使用 XGit Web', welcomeSub:'随时随地，轻松管理你的 GitHub 仓库。',
+    signedIn:'已登录', repos:'仓库', pleaseSignIn:'请先登录', readme:'README',
+    openGithub:'在 GitHub 打开', zip:'下载 ZIP', copyGit:'复制 Git URL', downloadZip:'下载 ZIP',
+    noRepos:'暂无仓库'
+  },
+  en: {
+    signIn: 'Sign in with Token', signOut:'Sign out', refresh:'Refresh', backToSite:'Back to Site', back:'Back',
+    welcomeTitle:'Welcome to XGit Web', welcomeSub:'Manage your GitHub repos on the go.',
+    signedIn:'Signed in', repos:'Repositories', pleaseSignIn:'Please sign in first', readme:'README',
+    openGithub:'Open on GitHub', zip:'Download ZIP', copyGit:'Copy Git URL', downloadZip:'Download ZIP',
+    noRepos:'No repositories found'
+  }
+};
+  zh: {
     signIn: '用 Token 登录', signOut: '退出登录', refresh: '刷新', backToSite:'返回官网',
     welcomeTitle:'欢迎使用 XGit Web', welcomeSub:'随时随地，轻松管理你的 GitHub 仓库。',
     signedIn:'已登录', repos:'仓库', pleaseSignIn:'请先登录',
@@ -27,6 +42,7 @@ function applyI18n(){
 
 /* ---------- auth/api ---------- */
 const LS_TOKEN = 'xgit_token';
+let currentRepo = null; // 当前查看的仓库信息
 async function fetchJson(url, token){
   const base = {'Accept':'application/vnd.github+json'};
   const tries = token ? [
@@ -68,6 +84,22 @@ async function apiReadme(owner, repo, ref){
 
 /* ---------- state/ui ---------- */
 function setSignedUI(me){
+  if(me){
+    $('#userBox').hidden = false;
+    $('#repoEmpty').hidden = true;
+    $('#userName').textContent = me.login;
+    $('#userAvatar').src = me.avatar_url + '&s=80';
+    $('#btnSign').textContent = t('signOut'); $('#btnSign').dataset.mode='out';
+    $('#btnSign2').textContent = t('signOut'); $('#btnSign2').dataset.mode='out';
+  }else{
+    $('#userBox').hidden = true;
+    $('#repoEmpty').hidden = false;
+    $('#repoList').innerHTML='';
+    $('#repoList').hidden = true;
+    $('#btnSign').textContent = t('signIn'); delete $('#btnSign').dataset.mode;
+    $('#btnSign2').textContent = t('signIn'); delete $('#btnSign2').dataset.mode;
+  }
+}
   if(me){
     $('#userBox').hidden = false;
     $('#notSigned').hidden = true;
@@ -196,6 +228,37 @@ async function loadRepos(){
 }
 
 async function openRepoDetail(owner, repo, branch, htmlUrl){
+  currentRepo = { owner, repo, branch, htmlUrl };
+  
+  // show detail card and hide list
+  $('#repoDetailCard').hidden = false;
+  $('#repoListCard').hidden = true;
+  $('#welcomeCard').hidden = true;
+  
+  $('#repoFullname').textContent = `${owner}/${repo}`;
+  $('#repoBranch').textContent = branch;
+  $('#btnOpenGH').onclick = ()=> window.open(htmlUrl,'_blank');
+  $('#btnZip').onclick = ()=> window.open(`${htmlUrl}/archive/refs/heads/${branch}.zip`,'_blank');
+
+  // readme
+  $('#readmeBox').innerHTML = '<div class="muted">Loading README…</div>';
+  try{
+    const md = await apiReadme(owner, repo, branch);
+    $('#readmeBox').innerHTML = md ? mdToHtml(md) : '<div class="muted">No README found</div>';
+  }catch{
+    $('#readmeBox').innerHTML = '<div class="muted">README not accessible</div>';
+  }
+  
+  // auto-populate files widget
+  const ownerInput = $('#xg-owner');
+  const repoInput = $('#xg-repo');  
+  const branchInput = $('#xg-branch');
+  if (ownerInput && repoInput && branchInput) {
+    ownerInput.value = owner;
+    repoInput.value = repo;
+    branchInput.value = branch;
+  }
+}
   $('#repoDetail').hidden = false;
   $('#repoFullName').textContent = `${owner}/${repo}`;
   $('#repoBranch').textContent = branch;
@@ -214,7 +277,30 @@ async function openRepoDetail(owner, repo, branch, htmlUrl){
   $('#repoDetail').scrollIntoView({behavior:'smooth', block:'start'});
 }
 
+function backToList(){
+  $('#repoDetailCard').hidden = true;
+  $('#repoListCard').hidden = false;
+  $('#welcomeCard').hidden = false;
+  currentRepo = null;
+}
+function bind(){
 /* ---------- bind & boot ---------- */
+function bind(){
+  // lang
+  $('#langZh').onclick = ()=>{ lang='zh'; localStorage.setItem('xgit_lang',lang); applyI18n(); };
+  $('#langEn').onclick = ()=>{ lang='en'; localStorage.setItem('xgit_lang',lang); applyI18n(); };
+  // top buttons
+  $('#btnBack').onclick = ()=> location.href = 'https://xgit.ximory.com/';
+  $('#btnSign').onclick = async (e)=>{
+    if(e.currentTarget.dataset.mode==='out') await signOutFlow(); else await signInFlow();
+  };
+  $('#btnSign2').onclick = async (e)=>{
+    if(e.currentTarget.dataset.mode==='out') await signOutFlow(); else await signInFlow();
+  };
+  $('#btnRefresh').onclick = refreshFlow;
+  $('#repoReload').onclick = loadRepos;
+  $('#backToList').onclick = backToList;
+}
 function bind(){
   // lang
   $('#langZh').onclick = ()=>{ lang='zh'; localStorage.setItem('xgit_lang',lang); applyI18n(); };
