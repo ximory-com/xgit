@@ -74,7 +74,42 @@ async function apiReadme(owner, repo, ref){
 }
 
 /* ---------- state/ui ---------- */
+  if(me){
+    $('#userBox').hidden = false;
+    $('#repoEmpty').hidden = true;
+    $('#userName').textContent = me.login;
+    $('#userAvatar').src = me.avatar_url + '&s=80';
+    $('#btnSign').textContent = t('signOut'); $('#btnSign').dataset.mode='out';
+    $('#btnSign2').textContent = t('signOut'); $('#btnSign2').dataset.mode='out';
+  }else{
+    $('#userBox').hidden = true;
+    $('#repoEmpty').hidden = false;
+    $('#repoList').innerHTML='';
+    $('#repoList').hidden = true;
+    $('#btnSign').textContent = t('signIn'); delete $('#btnSign').dataset.mode;
+    $('#btnSign2').textContent = t('signIn'); delete $('#btnSign2').dataset.mode;
+  }
+}
 function setSignedUI(me){
+  const repoCard = $('#repoListCard');
+  if(me){
+    $('#userBox').hidden = false;
+    $('#repoEmpty').hidden = true;
+    if(repoCard) repoCard.hidden = false;
+    $('#userName').textContent = me.login;
+    $('#userAvatar').src = me.avatar_url + '&s=80';
+    $('#btnSign').textContent = t('signOut'); $('#btnSign').dataset.mode='out';
+    $('#btnSign2').textContent = t('signOut'); $('#btnSign2').dataset.mode='out';
+  }else{
+    $('#userBox').hidden = true;
+    $('#repoEmpty').hidden = false;
+    if(repoCard) repoCard.hidden = true;
+    $('#repoList').innerHTML='';
+    $('#repoList').hidden = true;
+    $('#btnSign').textContent = t('signIn'); delete $('#btnSign').dataset.mode;
+    $('#btnSign2').textContent = t('signIn'); delete $('#btnSign2').dataset.mode;
+  }
+}
   if(me){
     $('#userBox').hidden = false;
     $('#repoEmpty').hidden = true;
