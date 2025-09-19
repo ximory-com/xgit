@@ -13,18 +13,8 @@ XGit is a lightweight GitHub web client focused on **repository browsing and cod
 It enables you to browse repositories, edit files, and commit changes directly from your phone or browser, with bilingual (EN/中文) support.  
 
 ---
-
-## ⚠️ Important Changes (2025-09)
-
-- 所有 **file.* 写类指令**（`file.write/append/prepend/replace/delete/move/chmod` 等）已弃用。  
-- 请统一使用 **git.diff** 协议来进行变更，当前支持：
-  - A-only（新增）
-  - M-only（修改）
-  - D-only（删除）
-  - R-only（改名，禁止 R+M 组合）
-  - Mode-only（权限）
-
----
+# XGit 补丁协议技术规范 v1.0
+查看 [文档](./docs/PATCH-PROTOCOL.md)
 
 ## ✨ 特点 Features
 - 📂 仓库树浏览
