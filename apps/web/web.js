@@ -228,7 +228,23 @@ async function loadRepos(){
   });
 }
 
+  $('#repoDetail').hidden = false;
+  $('#repoFullName').textContent = `${owner}/${repo}`;
+  $('#repoBranch').textContent = branch;
+  $('#btnOpenGH').onclick = ()=> window.open(htmlUrl,'_blank');
+  $('#btnZip').onclick = ()=> window.open(`${htmlUrl}/archive/refs/heads/${branch}.zip`,'_blank');
 async function openRepoDetail(owner, repo, branch, htmlUrl){
+  currentRepo = { owner, repo, branch, htmlUrl };
+  
+  // show detail card and hide list
+  $('#repoDetailCard').hidden = false;
+  $('#repoListCard').hidden = true;
+  $('#welcomeCard').hidden = true;
+  
+  $('#repoFullname').textContent = `${owner}/${repo}`;
+  $('#repoBranch').textContent = branch;
+  $('#btnOpenGH').onclick = ()=> window.open(htmlUrl,'_blank');
+  $('#btnZip').onclick = ()=> window.open(`${htmlUrl}/archive/refs/heads/${branch}.zip`,'_blank');
   currentRepo = { owner, repo, branch, htmlUrl };
   
   // show detail card and hide list
