@@ -321,6 +321,7 @@ function bind(){
   $('#btnSignOut').onclick = signOutFlow;
   $('#btnRefresh').onclick = refreshFlow;
   $('#repoReload').onclick = loadRepos;
+  $('#backToList').onclick = backToList;
 }
 async function boot(){
   applyI18n(); bind();
