@@ -285,6 +285,13 @@ function backToList(){
   currentRepo = null;
 }
 function bind(){
+function backToList(){
+  $('#repoDetailCard').hidden = true;
+  $('#repoListCard').hidden = false;
+  $('#welcomeCard').hidden = false;
+  currentRepo = null;
+}
+
 /* ---------- bind & boot ---------- */
 function bind(){
   // lang
