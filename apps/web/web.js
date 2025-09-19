@@ -314,7 +314,19 @@ function bind(){
   $('#backToList').onclick = backToList;
 }
 
+  applyI18n(); bind();
+  const me = await validateToken(); setSignedUI(me);
+  if(me) await loadRepos();
+}
 async function boot(){
+  applyI18n(); bind();
+  const me = await validateToken(); 
+  setSignedUI(me);
+  if(me) await loadRepos();
+  // 初始化时隐藏仓库区如果没有登录
+  const repoCard = $('#repoListCard');
+  if(repoCard && !me) repoCard.hidden = true;
+}
   applyI18n(); bind();
   const me = await validateToken(); setSignedUI(me);
   if(me) await loadRepos();
