@@ -1,4 +1,5 @@
 # 目录结构
+```
 xgit/
  ├─ apps/
  │   ├─ android/
@@ -13,14 +14,22 @@ xgit/
  │   │   ├─ assets/
  │   │   │    ├─ logo.png
  │   │   │    └─ logo.svg
+ │   │   ├─ scripts/
+ │   │   │    └─ vercel-ignore.sh
  │   │   ├─ index.html
  │   │   ├─ site.css
- │   │   └─ site.js
+ │   │   ├─ site.js
+ │   │   └─ vercel.json
  │   ├─ web/
  │   │   ├─ assets/
+ │   │   │    ├─ logo.png
+ │   │   │    └─ logo.svg
+ │   │   ├─ scripts/
+ │   │   │    └─ vercel-ignore.sh
  │   │   ├─ index.html
  │   │   ├─ web.css
- │   │   └─ web.js
+ │   │   ├─ web.js
+ │   │   └─ vercel.json
  │   └─ wechat/
  │       └─ （空，预留）
  │
@@ -38,7 +47,7 @@ xgit/
  │
  ├─ LICENSE
  └─ README.md
-
+```
 
 # XGit 项目结构说明
 
@@ -61,6 +70,7 @@ xgit/
   - `site.css`  
   - `site.js`  
   - `assets/` (仅站点专用资源)
+  - `scripts/` (vercel部署排除更新脚本)
 
 - **web/**  
   网页版 Git 编辑器 (核心交互 App)，包含：
@@ -68,6 +78,7 @@ xgit/
   - `web.css`  
   - `web.js`  
   - `assets/`
+  - `scripts/` (vercel部署排除更新脚本)  
 
 - **wechat/**  
   微信小程序 (预留目录)。
