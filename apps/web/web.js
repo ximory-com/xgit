@@ -6,16 +6,14 @@ const esc = s => String(s??'').replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>'
 /* ---------- i18n (fallback to zh) ---------- */
 let lang = (localStorage.getItem('xgit_lang') || ((navigator.language||'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en'));
 const dict = {
-    signIn: '用 Token 登录', signOut: '退出登录', refresh: '刷新', backToSite:'返回官网', back:'返回',
-    signIn: '用 Token 登录', signOut: '退出登录', refresh: '刷新', backToSite:'官网', back:'返回',
+  zh: {
     signIn: '用 Token 登录', signOut: '退出登录', refresh: '刷新', backToSite:'返回官网', back:'返回',
     welcomeTitle:'欢迎使用 XGit Web', welcomeSub:'随时随地，轻松管理你的 GitHub 仓库。',
     signedIn:'已登录', repos:'仓库', pleaseSignIn:'请先登录', readme:'README',
     openGithub:'在 GitHub 打开', zip:'下载 ZIP', copyGit:'复制 Git URL', downloadZip:'下载 ZIP',
     noRepos:'暂无仓库'
   },
-    signIn: 'Sign in with Token', signOut:'Sign out', refresh:'Refresh', backToSite:'Back to Site', back:'Back',
-    signIn: 'Sign in with Token', signOut:'Sign out', refresh:'Refresh', backToSite:'Site', back:'Back',
+  en: {
     signIn: 'Sign in with Token', signOut:'Sign out', refresh:'Refresh', backToSite:'Back to Site', back:'Back',
     welcomeTitle:'Welcome to XGit Web', welcomeSub:'Manage your GitHub repos on the go.',
     signedIn:'Signed in', repos:'Repositories', pleaseSignIn:'Please sign in first', readme:'README',
@@ -94,99 +92,7 @@ async function apiReadme(owner, repo, ref){
 }
 
 /* ---------- state/ui ---------- */
-  const repoCard = $('#repoListCard');
-  if(me){
-    $('#userBox').hidden = false;
-    $('#repoEmpty').hidden = true;
-    if(repoCard) repoCard.hidden = false; // 显示仓库区
-    $('#userName').textContent = me.login;
-    $('#userAvatar').src = me.avatar_url + '&s=80';
-    
-    // 设置登出按钮样式为橙色
-    const btnSign = $('#btnSign');
-    const btnSign2 = $('#btnSign2');
-    if(btnSign) {
-      btnSign.textContent = t('signOut');
-      btnSign.dataset.mode = 'out';
-      btnSign.className = 'btn warning'; // 橙色样式
-    }
-    if(btnSign2) {
-      btnSign2.textContent = t('signOut');
-      btnSign2.dataset.mode = 'out';
-      btnSign2.className = 'btn warning'; // 橙色样式
-    }
-  }else{
-    $('#userBox').hidden = true;
-    $('#repoEmpty').hidden = false;
-    if(repoCard) repoCard.hidden = true; // 隐藏仓库区
-    $('#repoList').innerHTML='';
-    $('#repoList').hidden = true;
-    
-    // 恢复登录按钮样式
-    const btnSign = $('#btnSign');
-    const btnSign2 = $('#btnSign2');
-    if(btnSign) {
-      btnSign.textContent = t('signIn');
-      delete btnSign.dataset.mode;
-      btnSign.className = 'btn danger';
-    }
-    if(btnSign2) {
-      btnSign2.textContent = t('signIn');
-      delete btnSign2.dataset.mode;
-      btnSign2.className = 'btn primary';
-    }
-  }
-}
 function setSignedUI(me){
-  const repoCard = $('#repoListCard');
-  if(me){
-    $('#userBox').hidden = false;
-    $('#repoEmpty').hidden = true;
-    if(repoCard) {
-      repoCard.hidden = false; // 显示仓库区
-      repoCard.classList.remove('hidden'); // 确保移除hidden类
-    }
-    $('#userName').textContent = me.login;
-    $('#userAvatar').src = me.avatar_url + '&s=80';
-    
-    // 设置登出按钮样式为橙色
-    const btnSign = $('#btnSign');
-    const btnSign2 = $('#btnSign2');
-    if(btnSign) {
-      btnSign.textContent = t('signOut');
-      btnSign.dataset.mode = 'out';
-      btnSign.className = 'btn warning'; // 橙色样式
-    }
-    if(btnSign2) {
-      btnSign2.textContent = t('signOut');
-      btnSign2.dataset.mode = 'out';
-      btnSign2.className = 'btn warning'; // 橙色样式
-    }
-  }else{
-    $('#userBox').hidden = true;
-    $('#repoEmpty').hidden = false;
-    if(repoCard) {
-      repoCard.hidden = true; // 隐藏仓库区
-      repoCard.classList.add('hidden'); // 确保添加hidden类
-    }
-    $('#repoList').innerHTML='';
-    $('#repoList').hidden = true;
-    
-    // 恢复登录按钮样式
-    const btnSign = $('#btnSign');
-    const btnSign2 = $('#btnSign2');
-    if(btnSign) {
-      btnSign.textContent = t('signIn');
-      delete btnSign.dataset.mode;
-      btnSign.className = 'btn danger';
-    }
-    if(btnSign2) {
-      btnSign2.textContent = t('signIn');
-      delete btnSign2.dataset.mode;
-      btnSign2.className = 'btn primary';
-    }
-  }
-}
   const repoCard = $('#repoListCard');
   if(me){
     $('#userBox').hidden = false;
@@ -237,32 +143,7 @@ async function validateToken(){
   try{ return await apiMe(); }catch{ return null; }
 }
 
-  const token = prompt(lang==='zh'?'请输入 GitHub Token（建议 scope: repo）':'Paste a GitHub Token (scope: repo)');
-  if(!token) return;
-  localStorage.setItem(LS_TOKEN, token.trim());
-  const me = await validateToken();
-  if(me){ setSignedUI(me); await loadRepos(); alert(lang==='zh'?'登录成功':'Signed in'); }
-  else { localStorage.removeItem(LS_TOKEN); alert(lang==='zh'?'Token 无效':'Invalid token'); }
-}
 async function signInFlow(){
-  const token = prompt(lang==='zh'?'请输入 GitHub Token（建议 scope: repo）':'Paste a GitHub Token (scope: repo)');
-  if(!token) return;
-  localStorage.setItem(LS_TOKEN, token.trim());
-  try{
-    const me = await validateToken();
-    if(me){ 
-      setSignedUI(me); 
-      await loadRepos(); 
-      alert(lang==='zh'?'登录成功':'Signed in'); 
-    } else { 
-      localStorage.removeItem(LS_TOKEN); 
-      alert(lang==='zh'?'Token 无效':'Invalid token'); 
-    }
-  }catch(e){
-    localStorage.removeItem(LS_TOKEN);
-    alert(lang==='zh'?'登录失败: '+e.message:'Login failed: '+e.message);
-  }
-}
   const token = prompt(lang==='zh'?'请输入 GitHub Token（建议 scope: repo）':'Paste a GitHub Token (scope: repo)');
   if(!token) return;
   localStorage.setItem(LS_TOKEN, token.trim());
