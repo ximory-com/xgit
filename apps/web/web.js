@@ -145,7 +145,32 @@ async function validateToken(){
   try{ return await apiMe(); }catch{ return null; }
 }
 
+  const token = prompt(lang==='zh'?'请输入 GitHub Token（建议 scope: repo）':'Paste a GitHub Token (scope: repo)');
+  if(!token) return;
+  localStorage.setItem(LS_TOKEN, token.trim());
+  const me = await validateToken();
+  if(me){ setSignedUI(me); await loadRepos(); alert(lang==='zh'?'登录成功':'Signed in'); }
+  else { localStorage.removeItem(LS_TOKEN); alert(lang==='zh'?'Token 无效':'Invalid token'); }
+}
 async function signInFlow(){
+  const token = prompt(lang==='zh'?'请输入 GitHub Token（建议 scope: repo）':'Paste a GitHub Token (scope: repo)');
+  if(!token) return;
+  localStorage.setItem(LS_TOKEN, token.trim());
+  try{
+    const me = await validateToken();
+    if(me){ 
+      setSignedUI(me); 
+      await loadRepos(); 
+      alert(lang==='zh'?'登录成功':'Signed in'); 
+    } else { 
+      localStorage.removeItem(LS_TOKEN); 
+      alert(lang==='zh'?'Token 无效':'Invalid token'); 
+    }
+  }catch(e){
+    localStorage.removeItem(LS_TOKEN);
+    alert(lang==='zh'?'登录失败: '+e.message:'Login failed: '+e.message);
+  }
+}
   const token = prompt(lang==='zh'?'请输入 GitHub Token（建议 scope: repo）':'Paste a GitHub Token (scope: repo)');
   if(!token) return;
   localStorage.setItem(LS_TOKEN, token.trim());
