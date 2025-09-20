@@ -6,14 +6,6 @@
   <title>XGit Web App</title>
   <link rel="icon" href="../assets/logo.png">
   <link rel="stylesheet" href="./web.css">
-  <style>
-    img{max-width:100%;height:auto}
-    .hero{padding:32px 0 24px;text-align:center;display:flex;flex-wrap:wrap;align-items:center;gap:24px}
-    .hero-text{flex:1;min-width:280px;text-align:left}
-    .hero-side{flex:0 0 auto}
-    .hero img,.hero .hero-logo{width:min(200px,40vw)}
-    .logo,.logo-grid img,header img{max-width:120px}
-  </style>
   <script>
     (function(){
       var SITE='https://xgit.ximory.com/';
@@ -26,25 +18,17 @@
           if(l==='en'&&en!=null) el.textContent=en;
           if(l==='zh'&&zh!=null) el.textContent=zh;
         });
-        document.querySelectorAll('.i18n-only-zh').forEach(function(el){ el.style.display=(l==='zh'?'':'none'); });
-        document.querySelectorAll('.i18n-only-en').forEach(function(el){ el.style.display=(l==='en'?'':'none'); });
       }
       function setLang(l){ l=(l==='en'?'en':'zh'); localStorage.setItem(KEY,l); applyLang(l); }
       document.addEventListener('click', function(e){
-        var el = e.target.closest && e.target.closest('[data-lang], .nav-site, [data-nav="site"], #btnBack');
+        var el = e.target.closest && e.target.closest('[data-lang]');
         if(!el) return;
-        if(el.matches('.nav-site, [data-nav="site"], #btnBack')){ e.preventDefault(); location.href=SITE; return; }
         if(el.hasAttribute('data-lang')){
           var v=(el.getAttribute('data-lang')||'').toLowerCase();
           if(v==='zh'||v==='en') setLang(v);
         }
       });
       document.addEventListener('DOMContentLoaded', function(){
-        Array.prototype.forEach.call(document.querySelectorAll('button,a'), function(el){
-          var t=(el.textContent||'').trim().toLowerCase();
-          if(t==='中文') el.setAttribute('data-lang','zh');
-          if(t==='en')   el.setAttribute('data-lang','en');
-        });
         applyLang(getLang());
       });
     })();
@@ -52,80 +36,50 @@
 </head>
 <body>
 
-  <!-- XGIT:BEGIN toolbar -->
   <header class="top">
-      <a class="brand-link" href="https://xgit.ximory.com/" target="_self">
-        <img class="brand-logo logo-mini" src="../assets/logo.svg" alt="XGit">
-        <span class="brand-name">XGit</span>
-      </a>
-    </div>
     <a class="brand" href="https://xgit.ximory.com/">
       <img src="../assets/logo.svg" alt="XGit" class="brand-logo">
       <span class="brand-name">XGit</span>
     </a>
-      <a class="brand-link" href="https://xgit.ximory.com/" target="_self">
-        <img class="brand-logo logo-mini" src="../assets/logo.svg" alt="XGit">
-        <span class="brand-name">XGit</span>
-      </a>
-    </div>
-      <a class="btn ghost" href="https://xgit.ximory.com/" target="_self" data-i18n="backToSite">返回官网</a>
-      <a class="btn ghost" href="https://github.com/ximory-com/xgit" target="_blank" rel="noopener">GitHub</a>
-      <div class="lang">
-        <button id="langZh" class="btn ghost" data-lang="zh">中文</button>
-        <button id="langEn" class="btn ghost" data-lang="en">EN</button>
-      </div>
-    </nav>
     <nav class="nav">
       <a href="https://github.com/ximory-com/xgit" target="_blank" rel="noopener">GitHub</a>
       <a href="https://xgit.ximory.com/" target="_self">Web App</a>
       <div class="lang">
-        <button id="langZh" type="button">中文</button>
-        <button id="langEn" type="button">EN</button>
-      </div>
-    </nav>
-      <a class="btn ghost" href="https://xgit.ximory.com/" target="_self" data-i18n="backToSite">返回官网</a>
-      <a class="btn ghost" href="https://github.com/ximory-com/xgit" target="_blank" rel="noopener">GitHub</a>
-      <div class="lang">
-        <button id="langZh" class="btn ghost" data-lang="zh">中文</button>
-        <button id="langEn" class="btn ghost" data-lang="en">EN</button>
+        <button id="langZh" type="button" data-lang="zh">中文</button>
+        <button id="langEn" type="button" data-lang="en">EN</button>
       </div>
     </nav>
   </header>
-  <!-- XGIT:END toolbar -->
 
-  <main class="main container">
-
-    <!-- XGIT:BEGIN hero -->
+  <main class="section">
     <section class="card" id="welcomeCard">
       <div class="hero">
+        <div class="hero-logo">
+          <img src="../assets/logo.svg" alt="XGit Logo">
+        </div>
         <div class="hero-text">
           <h1 data-i18n="welcomeTitle">欢迎使用 XGit Web</h1>
           <p data-i18n="welcomeSub">随时随地，轻松管理你的 GitHub 仓库。</p>
-          <div class="hero-cta">
-            <button id="btnSign2" class="btn primary" data-mode="in" data-i18n="signIn">用 Token 登录</button>
-            <button id="btnRefresh" class="btn" data-i18n="refresh">刷新</button>
+        </div>
+        <div class="hero-cta">
+          <button id="btnSign2" class="btn primary" data-i18n="signIn">用 Token 登录</button>
+          <button id="btnRefresh" class="btn" data-i18n="refresh">刷新</button>
+        </div>
+        
+        <div id="userBox" class="userbox hidden">
+          <img id="userAvatar" class="avatar" alt="">
+          <div class="meta">
+            <div class="name" id="userName">-</div>
+            <div class="state chip" data-i18n="signedIn">已登录</div>
           </div>
-        </div>
-        <div class="hero-side">
-          <img class="logo-hero" src="../assets/logo.svg" alt="XGit Logo">
-        </div>
-      </div>
-
-      <div id="userBox" class="userbox hidden">
-        <img id="userAvatar" class="avatar" alt="">
-        <div class="meta">
-          <div class="name" id="userName">-</div>
-          <div class="state chip" data-i18n="signedIn">已登录</div>
-        </div>
-        <div class="ops">
-          <button id="btnSign" class="btn danger" data-mode="out" data-i18n="signOut">退出登录</button>
+          <div class="ops">
+            <button id="btnSign" class="btn danger" data-i18n="signOut">退出登录</button>
+          </div>
         </div>
       </div>
     </section>
-    <!-- XGIT:END hero -->
 
-    <!-- XGIT:BEGIN repoList -->
-    <section class="card" id="repoListCard">
+    <section class="card hidden" id="repoListCard">
       <div class="card-hd">
         <h2 data-i18n="repos">仓库</h2>
         <div class="tools">
@@ -135,9 +89,7 @@
       <div id="repoEmpty" class="empty hidden" data-i18n="pleaseSignIn">请先登录</div>
       <ul id="repoList" class="repolist hidden"></ul>
     </section>
-    <!-- XGIT:END repoList -->
 
-    <!-- XGIT:BEGIN repoDetail -->
     <section id="repoDetailCard" class="card hidden">
       <div class="card-hd">
         <h2 id="repoFullname">owner/repo</h2>
@@ -153,11 +105,8 @@
       <h3 class="subttl" data-i18n="readme">README</h3>
       <div id="readmeBox" class="readme-box">-</div>
     </section>
-    <!-- XGIT:END repoDetail -->
-
   </main>
 
   <script src="./web.js"></script>
-
 </body>
 </html>
