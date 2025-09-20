@@ -22,7 +22,35 @@ const dict = {
   }
 };
 function t(key){ return (dict[lang] && dict[lang][key]) ?? (dict['zh'][key] ?? key); }
+  $$('[data-i18n]').forEach(el=>{ el.textContent = t(el.getAttribute('data-i18n')); });
+  document.documentElement.lang = (lang==='zh'?'zh':'en');
+  
+  // 更新语言按钮状态
+  $('#langZh').classList.toggle('active', lang==='zh');
+  $('#langEn').classList.toggle('active', lang==='en');
+}
 function applyI18n(){
+  $$('[data-i18n]').forEach(el=>{ el.textContent = t(el.getAttribute('data-i18n')); });
+  document.documentElement.lang = (lang==='zh'?'zh':'en');
+  
+  // 更新语言按钮状态
+  $('#langZh').classList.toggle('active', lang==='zh');
+  $('#langEn').classList.toggle('active', lang==='en');
+  
+  // 重新应用登录状态的按钮文本
+  const btnSign = $('#btnSign');
+  const btnSign2 = $('#btnSign2');
+  if(btnSign && btnSign.dataset.mode === 'out') {
+    btnSign.textContent = t('signOut');
+  } else if(btnSign) {
+    btnSign.textContent = t('signIn');
+  }
+  if(btnSign2 && btnSign2.dataset.mode === 'out') {
+    btnSign2.textContent = t('signOut');
+  } else if(btnSign2) {
+    btnSign2.textContent = t('signIn');
+  }
+}
   $$('[data-i18n]').forEach(el=>{ el.textContent = t(el.getAttribute('data-i18n')); });
   document.documentElement.lang = (lang==='zh'?'zh':'en');
   
