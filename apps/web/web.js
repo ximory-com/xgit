@@ -78,7 +78,69 @@ async function apiReadme(owner, repo, ref){
 }
 
 /* ---------- state/ui ---------- */
+  const repoCard = $('#repoListCard');
+  if(me){
+    $('#userBox').hidden = false;
+    $('#repoEmpty').hidden = true;
+    if(repoCard) repoCard.hidden = false; // 显示仓库区
+    $('#userName').textContent = me.login;
+    $('#userAvatar').src = me.avatar_url + '&s=80';
+    $('#btnSign').textContent = t('signOut'); $('#btnSign').dataset.mode='out';
+    $('#btnSign2').textContent = t('signOut'); $('#btnSign2').dataset.mode='out';
+  }else{
+    $('#userBox').hidden = true;
+    $('#repoEmpty').hidden = false;
+    if(repoCard) repoCard.hidden = true; // 隐藏仓库区
+    $('#repoList').innerHTML='';
+    $('#repoList').hidden = true;
+    $('#btnSign').textContent = t('signIn'); delete $('#btnSign').dataset.mode;
+    $('#btnSign2').textContent = t('signIn'); delete $('#btnSign2').dataset.mode;
+  }
+}
 function setSignedUI(me){
+  const repoCard = $('#repoListCard');
+  if(me){
+    $('#userBox').hidden = false;
+    $('#repoEmpty').hidden = true;
+    if(repoCard) repoCard.hidden = false; // 显示仓库区
+    $('#userName').textContent = me.login;
+    $('#userAvatar').src = me.avatar_url + '&s=80';
+    
+    // 设置登出按钮样式为橙色
+    const btnSign = $('#btnSign');
+    const btnSign2 = $('#btnSign2');
+    if(btnSign) {
+      btnSign.textContent = t('signOut');
+      btnSign.dataset.mode = 'out';
+      btnSign.className = 'btn warning'; // 橙色警告样式
+    }
+    if(btnSign2) {
+      btnSign2.textContent = t('signOut');
+      btnSign2.dataset.mode = 'out';
+      btnSign2.className = 'btn warning'; // 橙色警告样式
+    }
+  }else{
+    $('#userBox').hidden = true;
+    $('#repoEmpty').hidden = false;
+    if(repoCard) repoCard.hidden = true; // 隐藏仓库区
+    $('#repoList').innerHTML='';
+    $('#repoList').hidden = true;
+    
+    // 恢复登录按钮样式
+    const btnSign = $('#btnSign');
+    const btnSign2 = $('#btnSign2');
+    if(btnSign) {
+      btnSign.textContent = t('signIn');
+      delete btnSign.dataset.mode;
+      btnSign.className = 'btn danger'; // 恢复默认样式
+    }
+    if(btnSign2) {
+      btnSign2.textContent = t('signIn');
+      delete btnSign2.dataset.mode;
+      btnSign2.className = 'btn primary'; // 恢复主要按钮样式
+    }
+  }
+}
   const repoCard = $('#repoListCard');
   if(me){
     $('#userBox').hidden = false;
