@@ -6,14 +6,16 @@ const esc = s => String(s??'').replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>'
 /* ---------- i18n (fallback to zh) ---------- */
 let lang = (localStorage.getItem('xgit_lang') || ((navigator.language||'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en'));
 const dict = {
-  zh: {
+    signIn: '用 Token 登录', signOut: '退出登录', refresh: '刷新', backToSite:'返回官网', back:'返回',
+    signIn: '用 Token 登录', signOut: '退出登录', refresh: '刷新', backToSite:'官网', back:'返回',
     signIn: '用 Token 登录', signOut: '退出登录', refresh: '刷新', backToSite:'返回官网', back:'返回',
     welcomeTitle:'欢迎使用 XGit Web', welcomeSub:'随时随地，轻松管理你的 GitHub 仓库。',
     signedIn:'已登录', repos:'仓库', pleaseSignIn:'请先登录', readme:'README',
     openGithub:'在 GitHub 打开', zip:'下载 ZIP', copyGit:'复制 Git URL', downloadZip:'下载 ZIP',
     noRepos:'暂无仓库'
   },
-  en: {
+    signIn: 'Sign in with Token', signOut:'Sign out', refresh:'Refresh', backToSite:'Back to Site', back:'Back',
+    signIn: 'Sign in with Token', signOut:'Sign out', refresh:'Refresh', backToSite:'Site', back:'Back',
     signIn: 'Sign in with Token', signOut:'Sign out', refresh:'Refresh', backToSite:'Back to Site', back:'Back',
     welcomeTitle:'Welcome to XGit Web', welcomeSub:'Manage your GitHub repos on the go.',
     signedIn:'Signed in', repos:'Repositories', pleaseSignIn:'Please sign in first', readme:'README',
