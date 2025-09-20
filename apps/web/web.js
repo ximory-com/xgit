@@ -22,13 +22,6 @@ const dict = {
   }
 };
 function t(key){ return (dict[lang] && dict[lang][key]) ?? (dict['zh'][key] ?? key); }
-  $$('[data-i18n]').forEach(el=>{ el.textContent = t(el.getAttribute('data-i18n')); });
-  document.documentElement.lang = (lang==='zh'?'zh':'en');
-  
-  // 更新语言按钮状态
-  $('#langZh').classList.toggle('active', lang==='zh');
-  $('#langEn').classList.toggle('active', lang==='en');
-}
 function applyI18n(){
   $$('[data-i18n]').forEach(el=>{ el.textContent = t(el.getAttribute('data-i18n')); });
   document.documentElement.lang = (lang==='zh'?'zh':'en');
@@ -37,7 +30,7 @@ function applyI18n(){
   $('#langZh').classList.toggle('active', lang==='zh');
   $('#langEn').classList.toggle('active', lang==='en');
   
-  // 重新应用登录状态的按钮文本
+  // 保持登录状态的按钮文本
   const btnSign = $('#btnSign');
   const btnSign2 = $('#btnSign2');
   if(btnSign && btnSign.dataset.mode === 'out') {
@@ -50,13 +43,6 @@ function applyI18n(){
   } else if(btnSign2) {
     btnSign2.textContent = t('signIn');
   }
-}
-  $$('[data-i18n]').forEach(el=>{ el.textContent = t(el.getAttribute('data-i18n')); });
-  document.documentElement.lang = (lang==='zh'?'zh':'en');
-  
-  // 更新语言按钮状态
-  $('#langZh').classList.toggle('active', lang==='zh');
-  $('#langEn').classList.toggle('active', lang==='en');
 }
 
 /* ---------- auth/api ---------- */
@@ -106,44 +92,6 @@ async function apiReadme(owner, repo, ref){
 }
 
 /* ---------- state/ui ---------- */
-  const repoCard = $('#repoListCard');
-  if(me){
-    $('#userBox').hidden = false;
-    $('#repoEmpty').hidden = true;
-    if(repoCard) repoCard.hidden = false; // 显示仓库区
-    $('#userName').textContent = me.login;
-    $('#userAvatar').src = me.avatar_url + '&s=80';
-    $('#btnSign').textContent = t('signOut'); $('#btnSign').dataset.mode='out';
-    $('#btnSign2').textContent = t('signOut'); $('#btnSign2').dataset.mode='out';
-  }else{
-    $('#userBox').hidden = true;
-    $('#repoEmpty').hidden = false;
-    if(repoCard) repoCard.hidden = true; // 隐藏仓库区
-    $('#repoList').innerHTML='';
-    $('#repoList').hidden = true;
-    $('#btnSign').textContent = t('signIn'); delete $('#btnSign').dataset.mode;
-    $('#btnSign2').textContent = t('signIn'); delete $('#btnSign2').dataset.mode;
-  }
-}
-  const repoCard = $('#repoListCard');
-  if(me){
-    $('#userBox').hidden = false;
-    $('#repoEmpty').hidden = true;
-    if(repoCard) repoCard.hidden = false; // 显示仓库区
-    $('#userName').textContent = me.login;
-    $('#userAvatar').src = me.avatar_url + '&s=80';
-    $('#btnSign').textContent = t('signOut'); $('#btnSign').dataset.mode='out';
-    $('#btnSign2').textContent = t('signOut'); $('#btnSign2').dataset.mode='out';
-  }else{
-    $('#userBox').hidden = true;
-    $('#repoEmpty').hidden = false;
-    if(repoCard) repoCard.hidden = true; // 隐藏仓库区
-    $('#repoList').innerHTML='';
-    $('#repoList').hidden = true;
-    $('#btnSign').textContent = t('signIn'); delete $('#btnSign').dataset.mode;
-    $('#btnSign2').textContent = t('signIn'); delete $('#btnSign2').dataset.mode;
-  }
-}
 function setSignedUI(me){
   const repoCard = $('#repoListCard');
   if(me){
@@ -159,12 +107,12 @@ function setSignedUI(me){
     if(btnSign) {
       btnSign.textContent = t('signOut');
       btnSign.dataset.mode = 'out';
-      btnSign.className = 'btn warning'; // 橙色警告样式
+      btnSign.className = 'btn warning'; // 橙色样式
     }
     if(btnSign2) {
       btnSign2.textContent = t('signOut');
       btnSign2.dataset.mode = 'out';
-      btnSign2.className = 'btn warning'; // 橙色警告样式
+      btnSign2.className = 'btn warning'; // 橙色样式
     }
   }else{
     $('#userBox').hidden = true;
@@ -179,75 +127,13 @@ function setSignedUI(me){
     if(btnSign) {
       btnSign.textContent = t('signIn');
       delete btnSign.dataset.mode;
-      btnSign.className = 'btn danger'; // 恢复默认样式
+      btnSign.className = 'btn danger';
     }
     if(btnSign2) {
       btnSign2.textContent = t('signIn');
       delete btnSign2.dataset.mode;
-      btnSign2.className = 'btn primary'; // 恢复主要按钮样式
+      btnSign2.className = 'btn primary';
     }
-  }
-}
-  const repoCard = $('#repoListCard');
-  if(me){
-    $('#userBox').hidden = false;
-    $('#repoEmpty').hidden = true;
-    if(repoCard) repoCard.hidden = false; // 显示仓库区
-    $('#userName').textContent = me.login;
-    $('#userAvatar').src = me.avatar_url + '&s=80';
-    
-    // 设置登出按钮样式为橙色
-    const btnSign = $('#btnSign');
-    const btnSign2 = $('#btnSign2');
-    if(btnSign) {
-      btnSign.textContent = t('signOut');
-      btnSign.dataset.mode = 'out';
-      btnSign.className = 'btn warning'; // 橙色警告样式
-    }
-    if(btnSign2) {
-      btnSign2.textContent = t('signOut');
-      btnSign2.dataset.mode = 'out';
-      btnSign2.className = 'btn warning'; // 橙色警告样式
-    }
-  }else{
-    $('#userBox').hidden = true;
-    $('#repoEmpty').hidden = false;
-    if(repoCard) repoCard.hidden = true; // 隐藏仓库区
-    $('#repoList').innerHTML='';
-    $('#repoList').hidden = true;
-    
-    // 恢复登录按钮样式
-    const btnSign = $('#btnSign');
-    const btnSign2 = $('#btnSign2');
-    if(btnSign) {
-      btnSign.textContent = t('signIn');
-      delete btnSign.dataset.mode;
-      btnSign.className = 'btn danger'; // 恢复默认样式
-    }
-    if(btnSign2) {
-      btnSign2.textContent = t('signIn');
-      delete btnSign2.dataset.mode;
-      btnSign2.className = 'btn primary'; // 恢复主要按钮样式
-    }
-  }
-}
-  const repoCard = $('#repoListCard');
-  if(me){
-    $('#userBox').hidden = false;
-    $('#repoEmpty').hidden = true;
-    if(repoCard) repoCard.hidden = false; // 显示仓库区
-    $('#userName').textContent = me.login;
-    $('#userAvatar').src = me.avatar_url + '&s=80';
-    $('#btnSign').textContent = t('signOut'); $('#btnSign').dataset.mode='out';
-    $('#btnSign2').textContent = t('signOut'); $('#btnSign2').dataset.mode='out';
-  }else{
-    $('#userBox').hidden = true;
-    $('#repoEmpty').hidden = false;
-    if(repoCard) repoCard.hidden = true; // 隐藏仓库区
-    $('#repoList').innerHTML='';
-    $('#repoList').hidden = true;
-    $('#btnSign').textContent = t('signIn'); delete $('#btnSign').dataset.mode;
-    $('#btnSign2').textContent = t('signIn'); delete $('#btnSign2').dataset.mode;
   }
 }
 

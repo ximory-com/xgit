@@ -28,6 +28,7 @@ p{margin:8px 0 0}
 .brand-logo{width:28px;height:28px}
 .brand-name{font-weight:700}
 .nav{display:flex;align-items:center;gap:18px}
+.lang{display:flex;gap:4px}
 .lang button{
   padding:6px 10px;border:1px solid var(--line);background:#fff;border-radius:999px;cursor:pointer
 }
@@ -47,8 +48,8 @@ p{margin:8px 0 0}
 .btn{padding:12px 18px;border-radius:12px;background:#eef2f7;border:1px solid var(--line);cursor:pointer;transition:box-shadow 0.2s}
 .btn.primary{background:var(--brand);color:#fff;border-color:var(--brand)}
 .btn.ghost{background:transparent}
-.btn.warning{background:#ff9500;color:#fff;border-color:#ff9500}
 .btn.danger{border-color:#ff7a7a;color:#b62222}
+.btn.warning{background:#ff9500;color:#fff;border-color:#ff9500}
 .btn:hover{box-shadow:0 4px 14px rgba(0,0,0,.08)}
 
 /* Hero section - centered and compact */
