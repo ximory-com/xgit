@@ -25,6 +25,10 @@ function t(key){ return (dict[lang] && dict[lang][key]) ?? (dict['zh'][key] ?? k
 function applyI18n(){
   $$('[data-i18n]').forEach(el=>{ el.textContent = t(el.getAttribute('data-i18n')); });
   document.documentElement.lang = (lang==='zh'?'zh':'en');
+  
+  // 更新语言按钮状态
+  $('#langZh').classList.toggle('active', lang==='zh');
+  $('#langEn').classList.toggle('active', lang==='en');
 }
 
 /* ---------- auth/api ---------- */
@@ -74,28 +78,12 @@ async function apiReadme(owner, repo, ref){
 }
 
 /* ---------- state/ui ---------- */
-  if(me){
-    $('#userBox').hidden = false;
-    $('#repoEmpty').hidden = true;
-    $('#userName').textContent = me.login;
-    $('#userAvatar').src = me.avatar_url + '&s=80';
-    $('#btnSign').textContent = t('signOut'); $('#btnSign').dataset.mode='out';
-    $('#btnSign2').textContent = t('signOut'); $('#btnSign2').dataset.mode='out';
-  }else{
-    $('#userBox').hidden = true;
-    $('#repoEmpty').hidden = false;
-    $('#repoList').innerHTML='';
-    $('#repoList').hidden = true;
-    $('#btnSign').textContent = t('signIn'); delete $('#btnSign').dataset.mode;
-    $('#btnSign2').textContent = t('signIn'); delete $('#btnSign2').dataset.mode;
-  }
-}
 function setSignedUI(me){
   const repoCard = $('#repoListCard');
   if(me){
     $('#userBox').hidden = false;
     $('#repoEmpty').hidden = true;
-    if(repoCard) repoCard.hidden = false;
+    if(repoCard) repoCard.hidden = false; // 显示仓库区
     $('#userName').textContent = me.login;
     $('#userAvatar').src = me.avatar_url + '&s=80';
     $('#btnSign').textContent = t('signOut'); $('#btnSign').dataset.mode='out';
@@ -103,23 +91,7 @@ function setSignedUI(me){
   }else{
     $('#userBox').hidden = true;
     $('#repoEmpty').hidden = false;
-    if(repoCard) repoCard.hidden = true;
-    $('#repoList').innerHTML='';
-    $('#repoList').hidden = true;
-    $('#btnSign').textContent = t('signIn'); delete $('#btnSign').dataset.mode;
-    $('#btnSign2').textContent = t('signIn'); delete $('#btnSign2').dataset.mode;
-  }
-}
-  if(me){
-    $('#userBox').hidden = false;
-    $('#repoEmpty').hidden = true;
-    $('#userName').textContent = me.login;
-    $('#userAvatar').src = me.avatar_url + '&s=80';
-    $('#btnSign').textContent = t('signOut'); $('#btnSign').dataset.mode='out';
-    $('#btnSign2').textContent = t('signOut'); $('#btnSign2').dataset.mode='out';
-  }else{
-    $('#userBox').hidden = true;
-    $('#repoEmpty').hidden = false;
+    if(repoCard) repoCard.hidden = true; // 隐藏仓库区
     $('#repoList').innerHTML='';
     $('#repoList').hidden = true;
     $('#btnSign').textContent = t('signIn'); delete $('#btnSign').dataset.mode;
@@ -155,22 +127,15 @@ async function refreshFlow(){
 
 /* ---------- markdown (very lite) ---------- */
 function mdToHtml(md=''){
-  // basic sanitization
   md = md.replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  // code blocks ```
   md = md.replace(/```([\s\S]*?)```/g, (_,code)=>'<pre><code>'+code.replace(/\n/g,'\n')+'</code></pre>');
-  // headings
   md = md.replace(/^###\s+(.*)$/gm,'<h3>$1</h3>')
          .replace(/^##\s+(.*)$/gm,'<h2>$1</h2>')
          .replace(/^#\s+(.*)$/gm,'<h1>$1</h1>');
-  // inline code
   md = md.replace(/`([^`]+)`/g,'<code>$1</code>');
-  // links [text](url)
   md = md.replace(/\[([^\]]+)\]\(([^\)]+)\)/g,'<a href="$2" target="_blank" rel="noreferrer">$1</a>');
-  // lists
   md = md.replace(/^\s*[-*]\s+(.*)$/gm,'<li>$1</li>');
   md = md.replace(/(<li>.*<\/li>)(?![\s\S]*<li>)/g, '<ul>$1</ul>');
-  // paragraphs
   md = md.replace(/(^|\n)([^<\n][^\n]*)(?=\n|$)/g, (m, p1, p2)=> p2.trim()? p1+'<p>'+p2+'</p>' : m);
   return md;
 }
@@ -191,7 +156,7 @@ async function loadRepos(){
   }
 
   if(!Array.isArray(repos) || repos.length===0){
-    $('#repoList').innerHTML = `<li class="muted" style="padding:20px;text-align:center">${t('noRepos') || '暂无仓库'}</li>`;
+    $('#repoList').innerHTML = `<li class="muted" style="padding:20px;text-align:center">${t('noRepos')}</li>`;
     return;
   }
 
@@ -230,18 +195,15 @@ async function loadRepos(){
 
   $('#repoList').innerHTML = html;
 
-  // click -> open detail
   $$('#repoList .repo').forEach(li=>{
     li.onclick = (e)=>{
-      if(e.target.closest('.btn-more, .menu')) return; // menu button handled below
+      if(e.target.closest('.btn-more, .menu')) return;
       openRepoDetail(li.dataset.owner, li.dataset.repo, li.dataset.branch, li.dataset.html);
     };
-    // menu
     const menuBtn = li.querySelector('.btn-more');
     const menu = li.querySelector('.menu');
     menuBtn.onclick = (e)=>{
       e.stopPropagation();
-      // close other menus
       $$('.menu').forEach(m => m !== menu && m.classList.add('hidden'));
       menu.classList.toggle('hidden');
     };
@@ -258,7 +220,6 @@ async function loadRepos(){
     };
   });
   
-  // close menus when clicking outside
   document.addEventListener('click', e => {
     if (!e.target.closest('.menu, .btn-more')) {
       $$('.menu').forEach(m => m.classList.add('hidden'));
@@ -269,7 +230,6 @@ async function loadRepos(){
 async function openRepoDetail(owner, repo, branch, htmlUrl){
   currentRepo = { owner, repo, branch, htmlUrl };
   
-  // show detail card and hide list
   $('#repoDetailCard').hidden = false;
   $('#repoListCard').hidden = true;
   $('#welcomeCard').hidden = true;
@@ -279,7 +239,6 @@ async function openRepoDetail(owner, repo, branch, htmlUrl){
   $('#btnOpenGH').onclick = ()=> window.open(htmlUrl,'_blank');
   $('#btnZip').onclick = ()=> window.open(`${htmlUrl}/archive/refs/heads/${branch}.zip`,'_blank');
 
-  // readme
   $('#readmeBox').innerHTML = '<div class="muted">Loading README…</div>';
   try{
     const md = await apiReadme(owner, repo, branch);
@@ -298,11 +257,8 @@ function backToList(){
 
 /* ---------- bind & boot ---------- */
 function bind(){
-  // lang
   $('#langZh').onclick = ()=>{ lang='zh'; localStorage.setItem('xgit_lang',lang); applyI18n(); };
   $('#langEn').onclick = ()=>{ lang='en'; localStorage.setItem('xgit_lang',lang); applyI18n(); };
-  // top buttons
-  $('#btnBack').onclick = ()=> location.href = 'https://xgit.ximory.com/';
   $('#btnSign').onclick = async (e)=>{
     if(e.currentTarget.dataset.mode==='out') await signOutFlow(); else await signInFlow();
   };
@@ -314,21 +270,12 @@ function bind(){
   $('#backToList').onclick = backToList;
 }
 
-  applyI18n(); bind();
-  const me = await validateToken(); setSignedUI(me);
-  if(me) await loadRepos();
-}
 async function boot(){
-  applyI18n(); bind();
+  applyI18n(); 
+  bind();
   const me = await validateToken(); 
   setSignedUI(me);
   if(me) await loadRepos();
-  // 初始化时隐藏仓库区如果没有登录
-  const repoCard = $('#repoListCard');
-  if(repoCard && !me) repoCard.hidden = true;
 }
-  applyI18n(); bind();
-  const me = await validateToken(); setSignedUI(me);
-  if(me) await loadRepos();
-}
+
 boot();
